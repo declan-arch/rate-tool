@@ -1,0 +1,60 @@
+{
+  "rate_types": {
+    "non_refundable": {
+      "label": "Non-Refundable",
+      "code": "NR",
+      "keywords": ["non-refundable", "no refund", "non refundable", "pay now", "prepaid", "advance purchase"]
+    },
+    "flexible": {
+      "label": "Flexible / Free Cancellation",
+      "code": "FLEX",
+      "keywords": ["free cancellation", "flexible", "cancel anytime", "refundable", "no charge", "cancellation policy"]
+    },
+    "bed_and_breakfast": {
+      "label": "Bed & Breakfast",
+      "code": "BB",
+      "keywords": ["bed and breakfast", "b&b", "bb", "breakfast included", "includes breakfast", "with breakfast"]
+    },
+    "dinner_bed_breakfast": {
+      "label": "Dinner, Bed & Breakfast",
+      "code": "DBB",
+      "keywords": ["dinner bed breakfast", "dbb", "half board", "dinner included", "includes dinner", "with dinner"]
+    },
+    "spa_inclusive": {
+      "label": "Spa Inclusive",
+      "code": "SPA",
+      "keywords": ["spa", "wellness", "spa credit", "spa package", "spa access", "treatment included"]
+    },
+    "room_only": {
+      "label": "Room Only",
+      "code": "RO",
+      "keywords": ["room only", "no meals", "self catering", "serviced apartment"]
+    }
+  },
+  "room_types": {
+    "standard": {
+      "label": "Standard (1-bed, 2pax)",
+      "code": "STD",
+      "keywords": ["standard", "classic", "studio", "deluxe studio", "1 bedroom", "one bedroom", "1-bed", "superior"],
+      "max_pax": 2
+    },
+    "luxury": {
+      "label": "Luxury (1-bed, 2pax)",
+      "code": "LUX",
+      "keywords": ["luxury", "premium", "executive", "premier", "signature", "grand"],
+      "max_pax": 2
+    },
+    "family_standard": {
+      "label": "Family Standard (2-bed, 4pax)",
+      "code": "FAM_STD",
+      "keywords": ["family", "2 bedroom", "two bedroom", "2-bed", "twin", "triple", "quad"],
+      "max_pax": 4
+    },
+    "family_luxury": {
+      "label": "Family Luxury (2-bed, 4pax)",
+      "code": "FAM_LUX",
+      "keywords": ["family luxury", "luxury family", "penthouse", "suite", "2 bed luxury", "2 bedroom premium"],
+      "max_pax": 4
+    }
+  }
+}

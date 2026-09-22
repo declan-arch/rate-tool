@@ -1,0 +1,48 @@
+{
+  "target_property": {
+    "name": "The Tyrwhitt",
+    "location": "Rosebank, Johannesburg",
+    "booking_com_id": "the-tyrwhitt-rosebank",
+    "booking_com_search": "The Tyrwhitt Rosebank",
+    "expedia_search": "The Tyrwhitt Rosebank Johannesburg",
+    "agoda_search": "The Tyrwhitt Rosebank",
+    "lekkeslaap_search": "The Tyrwhitt Rosebank",
+    "sa_venues_search": "The Tyrwhitt Rosebank",
+    "star_rating": 4,
+    "room_types": {
+      "standard": {"label": "Standard Apartment", "pax": 2, "beds": 1},
+      "luxury": {"label": "Luxury Apartment", "pax": 2, "beds": 1},
+      "family_standard": {"label": "Family Standard Apartment", "pax": 4, "beds": 2},
+      "family_luxury": {"label": "Family Luxury Apartment", "pax": 4, "beds": 2}
+    },
+    "nightly_rates": {
+      "1_bed": 2000,
+      "2_bed": 2600
+    },
+    "monthly_rates": {
+      "1_bed": 850,
+      "2_bed": 934
+    }
+  },
+  "competitor_set": {
+    "geo_radius_km": 3,
+    "star_rating_range": [3, 5],
+    "node_comps": [
+      "The Rosebank Hotel",
+      "Protea Hotel Johannesburg Balalaika Sandton",
+      "The Capital Mirage",
+      "Citadel Apartments Rosebank",
+      "Oakfields Rosebank",
+      "The Hyatt Regency Johannesburg"
+    ]
+  },
+  "scrape_config": {
+    "check_in_offset_days": 7,
+    "nights": 1,
+    "adults": 2,
+    "children": 0,
+    "currency": "ZAR",
+    "headless": true,
+    "timeout_ms": 30000
+  }
+}

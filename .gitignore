@@ -1,0 +1,24 @@
+# Secrets - never commit real API keys
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Playwright
+.playwright/
+
+# Generated scan output (rate data, reports)
+output/*.xlsx
+output/*.json
+output/~$*
+reports/*.xlsx
+
+# OS / editor junk
+.DS_Store
+.vscode/
+.idea/

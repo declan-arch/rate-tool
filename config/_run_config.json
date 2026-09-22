@@ -1,0 +1,40 @@
+{
+  "target_property": {
+    "name": "The Royal majestic hotel",
+    "location": "",
+    "booking_com_search": "The Royal majestic hotel",
+    "expedia_search": "The Royal majestic hotel",
+    "agoda_search": "The Royal majestic hotel",
+    "lekkeslaap_search": "The Royal majestic hotel",
+    "sa_venues_search": "The Royal majestic hotel",
+    "nightsbridge_search": "The Royal majestic hotel",
+    "airbnb_search": "The Royal majestic hotel",
+    "star_rating": 4,
+    "room_types": {},
+    "nightly_rates": {},
+    "monthly_rates": {}
+  },
+  "competitor_set": {
+    "geo_radius_km": 3,
+    "star_rating_range": [
+      3,
+      5
+    ],
+    "node_comps": [
+      "Radisson Red Johannesburg",
+      "Protea Hotel Johannesburg",
+      "Hyatt Place Johannesburg",
+      "Southern Sun OR Tambo",
+      "Garden Court Sandton City"
+    ]
+  },
+  "scrape_config": {
+    "check_in_offset_days": 7,
+    "nights": 1,
+    "adults": 2,
+    "children": 0,
+    "currency": "ZAR",
+    "headless": true,
+    "timeout_ms": 30000
+  }
+}
