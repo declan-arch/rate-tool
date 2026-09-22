@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import streamlit as st
+from streamlit.runtime.scriptrunner import add_script_run_ctx
 
 TOOL_DIR = Path(__file__).parent
 sys.path.insert(0, str(TOOL_DIR))
@@ -140,7 +141,7 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
         from interpreter import LLMInterpreter
         from interpreter.rule_interpreter import rule_interpret
         from reports import generate_report
-        from scrapers import AgodaScraper, AirbnbScraper, BookingScraper, LekkeSlaapScraper, NightsbridgeScraper, SAVenuesScraper
+        from scrapers import AgodaScraper, AirbnbScraper, BookingScraper, ExpediaScraper, LekkeSlaapScraper, NightsbridgeScraper, SAVenuesScraper
 
         scraper_map = {
             "booking_com": BookingScraper,
@@ -287,6 +288,7 @@ if run_button:
     st.session_state.interpreted_data = None
     st.session_state.error_message = None
     thread = threading.Thread(target=run_scan_thread, args=(config, selected_channels, not include_competitors, api_key, TOOL_DIR / "output"), daemon=True)
+    add_script_run_ctx(thread)
     thread.start()
     st.rerun()
 
