@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import sys
 import threading
 from datetime import datetime, timedelta
@@ -14,6 +15,21 @@ import streamlit as st
 
 TOOL_DIR = Path(__file__).parent
 sys.path.insert(0, str(TOOL_DIR))
+
+
+@st.cache_resource
+def _ensure_playwright_chromium():
+    """Download Chromium once per container — Streamlit Cloud never runs `playwright install` on its own."""
+    try:
+        subprocess.run(
+            ["playwright", "install", "chromium"],
+            check=True, capture_output=True, text=True, timeout=300,
+        )
+    except Exception as error:
+        logging.error(f"playwright install chromium failed: {error}")
+
+
+_ensure_playwright_chromium()
 
 st.set_page_config(
     page_title="Rate Intelligence · RevGrowth",
