@@ -5,6 +5,7 @@ from .lekkeslaap_scraper import LekkeSlaapScraper
 from .sa_venues_scraper import SAVenuesScraper
 from .nightsbridge_scraper import NightsbridgeScraper
 from .airbnb_scraper import AirbnbScraper
+from .direct_scraper import DirectScraper
 
 __all__ = [
     "BookingScraper",
@@ -14,4 +15,5 @@ __all__ = [
     "SAVenuesScraper",
     "NightsbridgeScraper",
     "AirbnbScraper",
+    "DirectScraper",
 ]

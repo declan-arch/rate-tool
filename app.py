@@ -74,6 +74,7 @@ CHANNEL_MAP = {
     "Airbnb": "airbnb",
 }
 CHANNEL_LABELS_DISPLAY = {value: key for key, value in CHANNEL_MAP.items()}
+CHANNEL_LABELS_DISPLAY["direct"] = "Direct Website"
 AREA_COMPETITORS = {
     "rosebank": ["Radisson Red Rosebank", "Clico Boutique Hotel Rosebank", "Hyatt Place Rosebank", "The Davinci Hotel and Suites Sandton", "Rosewood Johannesburg"],
     "sandton": ["Radisson Blu Gautrain Hotel Sandton", "Saxon Hotel Villas and Spa Sandton", "Hyatt Regency Johannesburg", "The Maslow Hotel Sandton", "InterContinental Johannesburg Sandton Towers"],
@@ -145,7 +146,7 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
         from interpreter import LLMInterpreter
         from interpreter.rule_interpreter import rule_interpret
         from reports import generate_report
-        from scrapers import AgodaScraper, AirbnbScraper, BookingScraper, LekkeSlaapScraper, NightsbridgeScraper, SAVenuesScraper
+        from scrapers import AgodaScraper, AirbnbScraper, BookingScraper, DirectScraper, LekkeSlaapScraper, NightsbridgeScraper, SAVenuesScraper
 
         scraper_map = {
             "booking_com": BookingScraper,
@@ -187,6 +188,17 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
                         return_exceptions=True,
                     )
                     records.extend(result for result in competitor_results if not isinstance(result, Exception) for result in result)
+
+            direct_url = config["target_property"].get("direct_website_url", "").strip()
+            if direct_url:
+                push_status(f"Checking direct website: {direct_url}...")
+                try:
+                    direct_results = await DirectScraper(config).run(direct_url)
+                    push_status(f"  → found {len(direct_results)} price(s) on direct site (best-effort).")
+                    records.extend(direct_results)
+                except Exception as error:
+                    push_status(f"  ⚠ Direct website check failed: {error}")
+
             return records
 
         raw_records = asyncio.run(scrape_all())
@@ -234,12 +246,13 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
         st.session_state.run_state = "error"
 
 
-def build_config(property_name, checkin_date, competitors, location=""):
+def build_config(property_name, checkin_date, competitors, location="", direct_website_url=""):
     offset_days = max(1, (checkin_date - datetime.today().date()).days)
     return {
         "target_property": {
             "name": property_name,
             "location": location,
+            "direct_website_url": direct_website_url,
             "booking_com_search": property_name,
             "expedia_search": property_name,
             "agoda_search": property_name,
@@ -268,6 +281,7 @@ with st.sidebar:
     property_name = st.text_input("Property name", placeholder="e.g. The Tyrwhitt Rosebank")
     location = st.selectbox("Area / suburb", ["(unspecified)"] + sorted(a.title() for a in AREA_COMPETITORS), help="Used for auto-detecting nearby competitors — pick the closest match even if not exact.")
     location = "" if location == "(unspecified)" else location.lower()
+    direct_website_url = st.text_input("Hotel's direct website (optional)", placeholder="e.g. themonarchhotel.co.za", help="Best-effort rate check on the property's own booking site — every hotel site is built differently, so this is lower-confidence than the OTA scrapers.")
     st.markdown("**Channels**")
     channel_selections = {label: st.checkbox(label, value=True) for label in CHANNEL_MAP}
     selected_channels = [CHANNEL_MAP[label] for label, selected in channel_selections.items() if selected]
@@ -325,7 +339,7 @@ if run_button:
         )
     else:
         st.session_state.competitor_fallback_warning = None
-    config = build_config(property_name.strip(), checkin_date, competitors_final, location)
+    config = build_config(property_name.strip(), checkin_date, competitors_final, location, direct_website_url.strip())
     (TOOL_DIR / "config" / "_run_config.json").write_text(json.dumps(config, indent=2))
     st.session_state.run_state = "running"
     st.session_state.status_messages = []

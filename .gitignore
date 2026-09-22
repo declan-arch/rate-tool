@@ -17,6 +17,7 @@ output/*.xlsx
 output/*.json
 output/~$*
 reports/*.xlsx
+config/_run_config.json
 
 # OS / editor junk
 .DS_Store
