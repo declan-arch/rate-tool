@@ -146,13 +146,20 @@ class BookingScraper(BaseScraper):
                 else:
                     room_label = last_room_label
 
-                # Rate plan / meal plan label
+                # Rate plan / meal plan label — Booking.com exposes this as a list of
+                # condition items (breakfast, cancellation, prepayment), not a single
+                # description field. e.g. [data-testid="rt-rate-breakfast-included"].
                 rate_label = ""
-                for sel in ['[data-testid="rate-plan-description"]', '.meal-type', '.hprt-policies-block', '.mealplan']:
-                    el = await row.query_selector(sel)
-                    if el:
-                        rate_label = (await el.inner_text()).strip()
-                        break
+                condition_items = await row.query_selector_all('.hprt-conditions-bui li[data-testid]')
+                if condition_items:
+                    parts = [(await item.inner_text()).strip() for item in condition_items]
+                    rate_label = " | ".join(p for p in parts if p)
+                if not rate_label:
+                    for sel in ['[data-testid="rate-plan-description"]', '.meal-type', '.hprt-policies-block', '.mealplan']:
+                        el = await row.query_selector(sel)
+                        if el:
+                            rate_label = (await el.inner_text()).strip()
+                            break
 
                 # Price
                 price_raw = ""
