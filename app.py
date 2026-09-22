@@ -85,13 +85,16 @@ AREA_COMPETITORS = {
 DEFAULT_COMPETITORS = ["Radisson Red Johannesburg", "Protea Hotel Johannesburg", "Hyatt Place Johannesburg", "Southern Sun OR Tambo", "Garden Court Sandton City"]
 
 
-def get_auto_competitors(property_name, count=5):
+def get_auto_competitors(property_name, location="", count=5):
+    """Match competitors by explicit location first, falling back to scanning the
+    property name text, then a generic default. Returns (competitors, used_default)."""
     name_lower = property_name.lower()
+    location_lower = (location or "").lower()
     for area, competitors in AREA_COMPETITORS.items():
-        if area in name_lower:
+        if area == location_lower or area in name_lower:
             filtered = [item for item in competitors if item.lower() not in name_lower and name_lower not in item.lower()]
-            return filtered[:count]
-    return DEFAULT_COMPETITORS[:count]
+            return filtered[:count], False
+    return DEFAULT_COMPETITORS[:count], True
 
 
 def init_state():
@@ -102,6 +105,7 @@ def init_state():
         "excel_path": None,
         "interpreted_data": None,
         "error_message": None,
+        "competitor_fallback_warning": None,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -141,11 +145,10 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
         from interpreter import LLMInterpreter
         from interpreter.rule_interpreter import rule_interpret
         from reports import generate_report
-        from scrapers import AgodaScraper, AirbnbScraper, BookingScraper, ExpediaScraper, LekkeSlaapScraper, NightsbridgeScraper, SAVenuesScraper
+        from scrapers import AgodaScraper, AirbnbScraper, BookingScraper, LekkeSlaapScraper, NightsbridgeScraper, SAVenuesScraper
 
         scraper_map = {
             "booking_com": BookingScraper,
-            "expedia": ExpediaScraper,
             "agoda": AgodaScraper,
             "lekkeslaap": LekkeSlaapScraper,
             "sa_venues": SAVenuesScraper,
@@ -208,6 +211,14 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
             push_status("  → No API key — using rule-based classification...")
             interpreted = rule_interpret(raw_records, target_name=target_name)
 
+        # Airbnb lists private rooms/apartments, not hotel inventory — its prices run far
+        # lower than hotel BAR rates by nature, so the hotel-calibrated low_price threshold
+        # (<R300) is not a real anomaly there. Strip it post-hoc rather than special-casing
+        # every interpreter (LLM and rule-based both apply the same fixed threshold).
+        for row in interpreted:
+            if row.get("channel") == "airbnb":
+                row["anomaly_flags"] = [f for f in row.get("anomaly_flags", []) if f != "low_price"]
+
         interp_path = output_dir / f"interpreted_rates_{run_timestamp}.json"
         interp_path.write_text(json.dumps(interpreted, indent=2, default=str))
         push_status("Generating Excel report...")
@@ -223,12 +234,12 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
         st.session_state.run_state = "error"
 
 
-def build_config(property_name, checkin_date, competitors):
+def build_config(property_name, checkin_date, competitors, location=""):
     offset_days = max(1, (checkin_date - datetime.today().date()).days)
     return {
         "target_property": {
             "name": property_name,
-            "location": "",
+            "location": location,
             "booking_com_search": property_name,
             "expedia_search": property_name,
             "agoda_search": property_name,
@@ -255,6 +266,8 @@ with st.sidebar:
     st.markdown("### ⚙️ Scan Settings")
     st.markdown("---")
     property_name = st.text_input("Property name", placeholder="e.g. The Tyrwhitt Rosebank")
+    location = st.selectbox("Area / suburb", ["(unspecified)"] + sorted(a.title() for a in AREA_COMPETITORS), help="Used for auto-detecting nearby competitors — pick the closest match even if not exact.")
+    location = "" if location == "(unspecified)" else location.lower()
     st.markdown("**Channels**")
     channel_selections = {label: st.checkbox(label, value=True) for label in CHANNEL_MAP}
     selected_channels = [CHANNEL_MAP[label] for label, selected in channel_selections.items() if selected]
@@ -274,13 +287,45 @@ with st.sidebar:
     if not property_name.strip():
         st.caption("⬆ Enter a property name to enable scanning.")
     st.markdown("---")
+    with st.expander("📂 View a local scan"):
+        st.caption("Booking.com and other OTAs may block Streamlit Cloud's IP. For reliable results, run `python run.py` on your own machine, then load the resulting interpreted_rates_*.json here to share it.")
+        uploaded = st.file_uploader("interpreted_rates_*.json", type="json", label_visibility="collapsed")
+        if uploaded is not None and st.button("Load into dashboard"):
+            try:
+                loaded = json.loads(uploaded.getvalue().decode("utf-8"))
+                loaded_target = next((row.get("property_name") for row in loaded if row.get("is_target_property")), "Your Property")
+                excel_out = TOOL_DIR / "output" / f"Rate_Intelligence_{loaded_target.replace(' ', '_')}_loaded.xlsx"
+                excel_out.parent.mkdir(parents=True, exist_ok=True)
+                from reports import generate_report
+                generate_report(loaded, str(excel_out), target_name=loaded_target)
+                st.session_state.interpreted_data = loaded
+                st.session_state.excel_path = str(excel_out)
+                st.session_state.run_state = "done"
+                st.session_state.error_message = None
+                st.rerun()
+            except Exception as error:
+                st.error(f"Couldn't load file: {error}")
+    st.markdown("---")
     st.caption("RevGrowth Rate Intelligence v1.0")
 
 st.markdown('<div class="rg-header"><div class="rg-title">📊 RevGrowth Rate Intelligence</div><div class="rg-tagline">Rate Intelligence for South African Hospitality</div></div>', unsafe_allow_html=True)
+if st.session_state.get("competitor_fallback_warning"):
+    st.warning(st.session_state.competitor_fallback_warning)
 
 if run_button:
-    competitors_final = competitors if competitors else get_auto_competitors(property_name)
-    config = build_config(property_name.strip(), checkin_date, competitors_final)
+    if competitors:
+        competitors_final, used_default = competitors, False
+    else:
+        competitors_final, used_default = get_auto_competitors(property_name, location)
+    if used_default:
+        st.session_state.competitor_fallback_warning = (
+            "No area was set and none was recognised from the property name — "
+            "used a generic Johannesburg competitor list. Pick an Area/suburb in the "
+            "sidebar or enter competitor names manually for accurate results."
+        )
+    else:
+        st.session_state.competitor_fallback_warning = None
+    config = build_config(property_name.strip(), checkin_date, competitors_final, location)
     (TOOL_DIR / "config" / "_run_config.json").write_text(json.dumps(config, indent=2))
     st.session_state.run_state = "running"
     st.session_state.status_messages = []
@@ -312,23 +357,30 @@ elif state == "running":
 elif state == "done":
     st.markdown('<div class="status-done">✅ Scan complete</div>', unsafe_allow_html=True)
     interpreted = st.session_state.interpreted_data or []
-    prices = [row.get("price_zar") for row in interpreted if row.get("price_zar")]
-    target_prices = [row["price_zar"] for row in interpreted if row.get("is_target_property") and row.get("price_zar")]
-    competitor_prices = [row["price_zar"] for row in interpreted if not row.get("is_target_property") and row.get("price_zar")]
-    metrics = [len(interpreted), len({row.get("channel") for row in interpreted}), round(sum(target_prices) / len(target_prices)) if target_prices else "N/A", round(sum(competitor_prices) / len(competitor_prices)) if competitor_prices else "N/A", sum(bool(row.get("anomaly_flags")) for row in interpreted)]
+    # Airbnb lists private rooms/apartments, not hotel inventory — no BB/DBB rate plans,
+    # no real geographic constraint on its search, and a structurally different price
+    # distribution. It's shown in its own section further down, never blended into the
+    # headline hotel-vs-hotel comparison below.
+    hotel_records = [row for row in interpreted if row.get("channel") != "airbnb"]
+    airbnb_records = [row for row in interpreted if row.get("channel") == "airbnb"]
+    target_prices = [row["price_zar"] for row in hotel_records if row.get("is_target_property") and row.get("price_zar")]
+    competitor_prices = [row["price_zar"] for row in hotel_records if not row.get("is_target_property") and row.get("price_zar")]
+    metrics = [len(hotel_records), len({row.get("channel") for row in hotel_records}), round(sum(target_prices) / len(target_prices)) if target_prices else "N/A", round(sum(competitor_prices) / len(competitor_prices)) if competitor_prices else "N/A", sum(bool(row.get("anomaly_flags")) for row in hotel_records)]
     labels = ["Total records", "Channels scraped", "Your avg rate", "Competitor avg", "Anomalies flagged"]
     columns = st.columns(5)
     for column, value, label in zip(columns, metrics, labels):
         with column:
             display = f"R {value:,}" if isinstance(value, int) and label in {"Your avg rate", "Competitor avg"} else value
             st.markdown(f'<div class="rg-metric"><div class="rg-metric-val">{display}</div><div class="rg-metric-lbl">{label}</div></div>', unsafe_allow_html=True)
+    if airbnb_records:
+        st.caption(f"ℹ️ {len(airbnb_records)} Airbnb listing(s) found but excluded from the stats above — see \"Alternative Accommodation (Airbnb)\" below.")
     excel_path = st.session_state.excel_path
-    if interpreted:
+    if hotel_records:
         import pandas as pd
         import plotly.express as px
         import plotly.graph_objects as go
 
-        chart_data = pd.DataFrame(interpreted)
+        chart_data = pd.DataFrame(hotel_records)
         chart_data["channel_label"] = chart_data["channel"].map(CHANNEL_LABELS_DISPLAY).fillna(chart_data["channel"])
         target_rows = chart_data[chart_data["is_target_property"].fillna(False)]
         target_name = target_rows["property_name"].dropna().iloc[0] if not target_rows.empty else "Your Property"
@@ -373,12 +425,30 @@ elif state == "done":
         figure.update_layout(showlegend=False, **layout)
         st.plotly_chart(figure, use_container_width=True)
 
+    if airbnb_records:
+        import pandas as pd
+        import plotly.express as px
+
+        with st.expander(f"🏠 Alternative Accommodation (Airbnb) — {len(airbnb_records)} listing(s), shown separately", expanded=False):
+            st.caption("Airbnb lists private rooms/apartments, not hotel rooms — prices aren't directly comparable to hotel BAR rates and are excluded from the stats and charts above.")
+            airbnb_df = pd.DataFrame(airbnb_records)
+            airbnb_df["price_zar"] = pd.to_numeric(airbnb_df["price_zar"], errors="coerce")
+            airbnb_priced = airbnb_df.dropna(subset=["price_zar"])
+            if not airbnb_priced.empty:
+                airbnb_avg = airbnb_priced.groupby("property_name", dropna=False)["price_zar"].mean().reset_index()
+                figure = px.bar(airbnb_avg, x="property_name", y="price_zar", title="Airbnb Listings — Average Price", labels={"property_name": "Listing", "price_zar": "Average price (ZAR)"})
+                figure.update_traces(marker_color="#8A6FBF")
+                figure.update_layout(paper_bgcolor="#0D1B2A", plot_bgcolor="#0D1B2A", font={"color": "#F0F0F0"}, xaxis={"gridcolor": "#1E3A5F"}, yaxis={"gridcolor": "#1E3A5F"}, margin={"l": 40, "r": 20, "t": 55, "b": 40})
+                st.plotly_chart(figure, use_container_width=True)
+            st.dataframe(pd.DataFrame([{"Listing": row.get("property_name", ""), "Price (ZAR)": row.get("price_zar")} for row in airbnb_records]), use_container_width=True, hide_index=True)
+
     if excel_path and Path(excel_path).exists():
         with open(excel_path, "rb") as report_file:
             st.download_button("⬇️ Download Excel Report", report_file.read(), file_name=Path(excel_path).name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     if interpreted:
         table = pd.DataFrame([{"Property": row.get("property_name", ""), "Channel": CHANNEL_LABELS_DISPLAY.get(row.get("channel", ""), row.get("channel", "")), "Room Type": row.get("room_type", ""), "Rate Type": row.get("rate_type", ""), "Price (ZAR)": row.get("price_zar"), "Competitor Tier": row.get("competitor_tier", ""), "Confidence": row.get("confidence", ""), "Anomalies": ", ".join(row.get("anomaly_flags", [])) or "—"} for row in interpreted])
         st.markdown("### Rate Summary Table")
+        st.caption("Includes all channels, including Airbnb — filter by Channel below. Headline stats above exclude Airbnb.")
         channel_filter = st.selectbox("Filter by channel", ["All"] + sorted(table["Channel"].dropna().unique().tolist()))
         rate_filter = st.selectbox("Filter by rate type", ["All"] + sorted(table["Rate Type"].dropna().unique().tolist()))
         if channel_filter != "All":
