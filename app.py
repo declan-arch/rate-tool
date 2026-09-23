@@ -67,35 +67,10 @@ st.markdown(
 ALLOWED_PASSWORDS = {"revgrowth2024", "rateiq", "tyrwhitt"}
 CHANNEL_MAP = {
     "Booking.com": "booking_com",
-    "Agoda": "agoda",
-    "LekkeSlaap": "lekkeslaap",
-    "SA Venues": "sa_venues",
-    "Nightsbridge": "nightsbridge",
     "Airbnb": "airbnb",
 }
 CHANNEL_LABELS_DISPLAY = {value: key for key, value in CHANNEL_MAP.items()}
 CHANNEL_LABELS_DISPLAY["direct"] = "Direct Website"
-AREA_COMPETITORS = {
-    "rosebank": ["Radisson Red Rosebank", "Clico Boutique Hotel Rosebank", "Hyatt Place Rosebank", "The Davinci Hotel and Suites Sandton", "Rosewood Johannesburg"],
-    "sandton": ["Radisson Blu Gautrain Hotel Sandton", "Saxon Hotel Villas and Spa Sandton", "Hyatt Regency Johannesburg", "The Maslow Hotel Sandton", "InterContinental Johannesburg Sandton Towers"],
-    "midrand": ["Protea Hotel Midrand", "Gallagher Estate Hotel Midrand", "Southern Sun Midrand", "Peermont Metcourt Hotel Midrand", "Garden Court Midrand"],
-    "cape town": ["The Silo Hotel Cape Town", "One&Only Cape Town", "Radisson Blu Hotel Waterfront Cape Town", "Taj Cape Town", "The Cape Milner Hotel"],
-    "waterfront": ["The Silo Hotel Cape Town", "One&Only Cape Town", "Radisson Blu Hotel Waterfront Cape Town", "Taj Cape Town", "Protea Hotel Victoria Junction"],
-    "durban": ["Radisson Blu Hotel Durban Umhlanga", "Protea Hotel Durban Umhlanga", "Coastlands Umhlanga Hotel", "The Oyster Box Umhlanga", "Garden Court South Beach Durban"],
-}
-DEFAULT_COMPETITORS = ["Radisson Red Johannesburg", "Protea Hotel Johannesburg", "Hyatt Place Johannesburg", "Southern Sun OR Tambo", "Garden Court Sandton City"]
-
-
-def get_auto_competitors(property_name, location="", count=5):
-    """Match competitors by explicit location first, falling back to scanning the
-    property name text, then a generic default. Returns (competitors, used_default)."""
-    name_lower = property_name.lower()
-    location_lower = (location or "").lower()
-    for area, competitors in AREA_COMPETITORS.items():
-        if area == location_lower or area in name_lower:
-            filtered = [item for item in competitors if item.lower() not in name_lower and name_lower not in item.lower()]
-            return filtered[:count], False
-    return DEFAULT_COMPETITORS[:count], True
 
 
 def init_state():
@@ -106,7 +81,6 @@ def init_state():
         "excel_path": None,
         "interpreted_data": None,
         "error_message": None,
-        "competitor_fallback_warning": None,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -146,14 +120,10 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
         from interpreter import LLMInterpreter
         from interpreter.rule_interpreter import rule_interpret
         from reports import generate_report
-        from scrapers import AgodaScraper, AirbnbScraper, BookingScraper, DirectScraper, LekkeSlaapScraper, NightsbridgeScraper, SAVenuesScraper
+        from scrapers import AirbnbScraper, BookingScraper, DirectScraper
 
         scraper_map = {
             "booking_com": BookingScraper,
-            "agoda": AgodaScraper,
-            "lekkeslaap": LekkeSlaapScraper,
-            "sa_venues": SAVenuesScraper,
-            "nightsbridge": NightsbridgeScraper,
             "airbnb": AirbnbScraper,
         }
         target_name = config["target_property"]["name"]
@@ -178,26 +148,27 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
                     push_status(f"  ⚠ {CHANNEL_LABELS_DISPLAY.get(channel, channel)} scraper error: {result}")
                 else:
                     records.extend(result)
-            if not target_only:
-                competitors = config["competitor_set"]["node_comps"]
-                push_status(f"Scraping {len(competitors)} competitor(s)...")
-                for competitor in competitors:
-                    push_status(f"  → {competitor}...")
-                    competitor_results = await asyncio.gather(
-                        *(scrape_one(channel, competitor) for channel in channels if channel in scraper_map),
-                        return_exceptions=True,
-                    )
-                    records.extend(result for result in competitor_results if not isinstance(result, Exception) for result in result)
-
             direct_url = config["target_property"].get("direct_website_url", "").strip()
             if direct_url:
                 push_status(f"Checking direct website: {direct_url}...")
                 try:
-                    direct_results = await DirectScraper(config).run(direct_url)
+                    direct_results = await DirectScraper(config).run(direct_url, target_name)
                     push_status(f"  → found {len(direct_results)} price(s) on direct site (best-effort).")
                     records.extend(direct_results)
                 except Exception as error:
                     push_status(f"  ⚠ Direct website check failed: {error}")
+
+            if not target_only:
+                competitor_urls = config["competitor_set"]["competitor_urls"]
+                push_status(f"Checking {len(competitor_urls)} competitor website(s)...")
+                for comp_url in competitor_urls:
+                    push_status(f"  → {comp_url}...")
+                    try:
+                        comp_results = await DirectScraper(config).run(comp_url)
+                        push_status(f"    found {len(comp_results)} price(s) (best-effort).")
+                        records.extend(comp_results)
+                    except Exception as error:
+                        push_status(f"  ⚠ {comp_url} failed: {error}")
 
             return records
 
@@ -246,26 +217,20 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
         st.session_state.run_state = "error"
 
 
-def build_config(property_name, checkin_date, competitors, location="", direct_website_url=""):
+def build_config(property_name, checkin_date, competitor_urls, direct_website_url=""):
     offset_days = max(1, (checkin_date - datetime.today().date()).days)
     return {
         "target_property": {
             "name": property_name,
-            "location": location,
             "direct_website_url": direct_website_url,
             "booking_com_search": property_name,
-            "expedia_search": property_name,
-            "agoda_search": property_name,
-            "lekkeslaap_search": property_name,
-            "sa_venues_search": property_name,
-            "nightsbridge_search": property_name,
             "airbnb_search": property_name,
             "star_rating": 4,
             "room_types": {},
             "nightly_rates": {},
             "monthly_rates": {},
         },
-        "competitor_set": {"geo_radius_km": 3, "star_rating_range": [3, 5], "node_comps": competitors},
+        "competitor_set": {"competitor_urls": competitor_urls},
         "scrape_config": {"check_in_offset_days": offset_days, "nights": 1, "adults": 2, "children": 0, "currency": "ZAR", "headless": True, "timeout_ms": 30000},
     }
 
@@ -279,21 +244,20 @@ with st.sidebar:
     st.markdown("### ⚙️ Scan Settings")
     st.markdown("---")
     property_name = st.text_input("Property name", placeholder="e.g. The Tyrwhitt Rosebank")
-    location = st.selectbox("Area / suburb", ["(unspecified)"] + sorted(a.title() for a in AREA_COMPETITORS), help="Used for auto-detecting nearby competitors — pick the closest match even if not exact.")
-    location = "" if location == "(unspecified)" else location.lower()
     direct_website_url = st.text_input("Hotel's direct website (optional)", placeholder="e.g. themonarchhotel.co.za", help="Best-effort rate check on the property's own booking site — every hotel site is built differently, so this is lower-confidence than the OTA scrapers.")
     st.markdown("**Channels**")
     channel_selections = {label: st.checkbox(label, value=True) for label in CHANNEL_MAP}
     selected_channels = [CHANNEL_MAP[label] for label, selected in channel_selections.items() if selected]
     checkin_date = st.date_input("Check-in date", value=datetime.today() + timedelta(days=7), min_value=datetime.today() + timedelta(days=1))
     include_competitors = st.toggle("Include competitors", value=True)
-    competitors = []
+    competitor_urls = []
     if include_competitors:
-        st.markdown("**Competitor names** *(blank = auto-detect)*")
+        st.markdown("**Competitor website URLs**")
+        st.caption("Same best-effort direct-site check as above, run once per competitor.")
         for index in range(5):
-            competitor = st.text_input(f"Competitor {index + 1}", key=f"competitor_{index}", placeholder="Leave blank for auto-detect", label_visibility="collapsed")
-            if competitor.strip():
-                competitors.append(competitor.strip())
+            comp_url = st.text_input(f"Competitor {index + 1} URL", key=f"competitor_url_{index}", placeholder="e.g. radissonhotels.com/...", label_visibility="collapsed")
+            if comp_url.strip():
+                competitor_urls.append(comp_url.strip())
     api_key = st.text_input("Anthropic API key", value=os.environ.get("ANTHROPIC_API_KEY", ""), type="password")
     st.markdown("---")
     can_run = bool(property_name.strip()) and bool(selected_channels) and st.session_state.run_state != "running"
@@ -323,23 +287,9 @@ with st.sidebar:
     st.caption("RevGrowth Rate Intelligence v1.0")
 
 st.markdown('<div class="rg-header"><div class="rg-title">📊 RevGrowth Rate Intelligence</div><div class="rg-tagline">Rate Intelligence for South African Hospitality</div></div>', unsafe_allow_html=True)
-if st.session_state.get("competitor_fallback_warning"):
-    st.warning(st.session_state.competitor_fallback_warning)
 
 if run_button:
-    if competitors:
-        competitors_final, used_default = competitors, False
-    else:
-        competitors_final, used_default = get_auto_competitors(property_name, location)
-    if used_default:
-        st.session_state.competitor_fallback_warning = (
-            "No area was set and none was recognised from the property name — "
-            "used a generic Johannesburg competitor list. Pick an Area/suburb in the "
-            "sidebar or enter competitor names manually for accurate results."
-        )
-    else:
-        st.session_state.competitor_fallback_warning = None
-    config = build_config(property_name.strip(), checkin_date, competitors_final, location, direct_website_url.strip())
+    config = build_config(property_name.strip(), checkin_date, competitor_urls, direct_website_url.strip())
     (TOOL_DIR / "config" / "_run_config.json").write_text(json.dumps(config, indent=2))
     st.session_state.run_state = "running"
     st.session_state.status_messages = []
@@ -357,7 +307,7 @@ if state == "idle":
     with left:
         st.markdown('<div class="rg-card"><h3 style="color:#C9A84C;margin-top:0">What this tool does</h3><p style="color:#C0C8D0;line-height:1.7">The <strong>Rate Intelligence Agent</strong> scans South African OTA channels for live property rates, compares them with selected competitors, and produces an Excel report.</p><h4 style="color:#2A9D8F">How it works</h4><ol style="color:#C0C8D0;line-height:1.9"><li><strong>Scrape</strong> live rate cards from each OTA.</li><li><strong>Interpret</strong> rates and flag anomalies.</li><li><strong>Report</strong> results in a colour-coded workbook.</li></ol></div>', unsafe_allow_html=True)
     with right:
-        st.markdown('<div class="rg-card"><h4 style="color:#C9A84C;margin-top:0">Quick start</h4><ol style="color:#C0C8D0;line-height:1.9"><li>Enter a property name.</li><li>Select channels and a check-in date.</li><li>Add competitors or use auto-detection.</li><li>Optionally provide an Anthropic API key.</li><li>Click <strong>Run Scan</strong>.</li></ol></div>', unsafe_allow_html=True)
+        st.markdown('<div class="rg-card"><h4 style="color:#C9A84C;margin-top:0">Quick start</h4><ol style="color:#C0C8D0;line-height:1.9"><li>Enter a property name and a check-in date.</li><li>Optionally add the hotel\'s direct website and competitor URLs.</li><li>Optionally provide an Anthropic API key.</li><li>Click <strong>Run Scan</strong>.</li></ol></div>', unsafe_allow_html=True)
 elif state == "running":
     st.markdown('<div class="status-running">⏳ Scan in progress</div>', unsafe_allow_html=True)
     messages = st.session_state.get("status_messages", [])
