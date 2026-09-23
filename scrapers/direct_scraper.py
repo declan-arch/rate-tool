@@ -22,6 +22,15 @@ BOOKING_KEYWORDS = re.compile(
     r"book|rate|room|night|stay|availab|reserv|price|check.?in|tariff",
     re.IGNORECASE,
 )
+# Booking-engine pages (e.g. a hosted results/checkout step) often carry a generic step
+# title like "Guests and Extras" instead of the hotel's name — reject titles made up
+# entirely of these words and fall back to the domain instead.
+GENERIC_TITLE_WORDS = {
+    "guests", "extras", "and", "checkout", "results", "result", "search", "availability",
+    "book", "now", "confirm", "confirmation", "payment", "reservation", "reservations",
+    "cart", "summary", "booking", "step", "details", "select", "choose", "review", "your",
+}
+COMMON_SUBDOMAIN_PREFIXES = {"www", "book", "booking", "reservations", "reservation", "res", "stay", "stays", "hotel", "hotels", "secure", "app"}
 
 
 class DirectScraper(BaseScraper):
@@ -92,19 +101,28 @@ class DirectScraper(BaseScraper):
 
     async def _derive_property_name(self, page, url: str) -> str:
         """No name is supplied for competitor URLs — best-effort label from the
-        page's own <title>, falling back to the domain name."""
+        page's own <title>, falling back to the domain name if the title looks like
+        a generic booking-flow step (e.g. "Guests and Extras") rather than a hotel name."""
         try:
             title = (await page.title()).strip()
             for sep in [" | ", " – ", " — ", " - ", " :: "]:
                 if sep in title:
                     title = title.split(sep)[0].strip()
                     break
-            if 2 <= len(title) <= 80:
+            words = set(re.findall(r"[a-z]+", title.lower()))
+            is_generic = bool(words) and words.issubset(GENERIC_TITLE_WORDS)
+            if title and 2 <= len(title) <= 80 and not is_generic:
                 return title
         except Exception:
             pass
-        host = (urlparse(url).netloc or url).replace("www.", "").split(".")[0]
-        return host.replace("-", " ").title() or "Competitor (direct site)"
+        return self._domain_to_name(url)
+
+    def _domain_to_name(self, url: str) -> str:
+        parts = [p for p in (urlparse(url).netloc or url).split(".") if p]
+        while parts and parts[0].lower() in COMMON_SUBDOMAIN_PREFIXES:
+            parts.pop(0)
+        brand = parts[0] if parts else (urlparse(url).netloc or url)
+        return brand.replace("-", " ").title() or "Competitor (direct site)"
 
     async def _extract_heuristic_prices(self, page, property_name, ci, co, source_url, scraped_at) -> list[RawRate]:
         """Scan the page for currency-formatted numbers near booking-related text.

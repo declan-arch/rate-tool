@@ -202,6 +202,18 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
             if row.get("channel") == "airbnb":
                 row["anomaly_flags"] = [f for f in row.get("anomaly_flags", []) if f != "low_price"]
 
+        # The LLM classifies competitor_tier per 12-record batch with no visibility into
+        # other batches, so a batch without the target's own rate in it has nothing to
+        # compare against and defaults to UNKNOWN. Recompute tier globally, once, now that
+        # the real target average is known across the whole scan — same logic rule_interpret
+        # already applied internally, now applied uniformly regardless of which interpreter ran.
+        from interpreter.rule_interpreter import classify_competitor_tier
+        target_prices_all = [r["price_zar"] for r in interpreted if r.get("is_target_property") and r.get("price_zar")]
+        target_avg_all = sum(target_prices_all) / len(target_prices_all) if target_prices_all else None
+        for row in interpreted:
+            if not row.get("is_target_property"):
+                row["competitor_tier"] = classify_competitor_tier(row.get("price_zar"), target_avg_rate=target_avg_all, is_target=False)
+
         interp_path = output_dir / f"interpreted_rates_{run_timestamp}.json"
         interp_path.write_text(json.dumps(interpreted, indent=2, default=str))
         push_status("Generating Excel report...")
@@ -368,11 +380,17 @@ elif state == "done":
 
         chart_left, chart_right = st.columns(2)
         with chart_left:
-            tier_counts = chart_data["competitor_tier"].fillna("UNKNOWN").value_counts().rename_axis("tier").reset_index(name="count")
+            # Target's own records aren't a "position" relative to itself — exclude them so
+            # the chart actually shows competitor cheaper/comparable/more-expensive spread.
+            competitor_only = chart_data[~chart_data["is_target_property"].fillna(False)]
+            tier_counts = competitor_only["competitor_tier"].fillna("UNKNOWN").value_counts().rename_axis("tier").reset_index(name="count")
             tier_colors = {"CHEAPER": "#2DC653", "COMPARABLE": "#C9A84C", "MORE_EXPENSIVE": "#E63946", "UNKNOWN": "#6C757D"}
-            figure = go.Figure(go.Pie(labels=tier_counts["tier"], values=tier_counts["count"], hole=0.5, marker={"colors": [tier_colors.get(tier, "#6C757D") for tier in tier_counts["tier"]]}))
-            figure.update_layout(title="Competitor Positioning", showlegend=True, **layout)
-            st.plotly_chart(figure, use_container_width=True)
+            if tier_counts.empty:
+                st.info("No competitor data to position yet.")
+            else:
+                figure = go.Figure(go.Pie(labels=tier_counts["tier"], values=tier_counts["count"], hole=0.5, marker={"colors": [tier_colors.get(tier, "#6C757D") for tier in tier_counts["tier"]]}))
+                figure.update_layout(title="Competitor Positioning", showlegend=True, **layout)
+                st.plotly_chart(figure, use_container_width=True)
         with chart_right:
             rate_counts = chart_data["rate_type"].fillna("UNKNOWN").value_counts().rename_axis("rate_type").reset_index(name="count")
             figure = px.bar(rate_counts, x="count", y="rate_type", orientation="h", title="Rate Types Found", labels={"count": "Count", "rate_type": "Rate type"})
@@ -393,7 +411,7 @@ elif state == "done":
         import pandas as pd
         import plotly.express as px
 
-        with st.expander(f"🏠 Alternative Accommodation (Airbnb) — {len(airbnb_records)} listing(s), shown separately", expanded=False):
+        with st.expander(f"🏠 Alternative Accommodation (Airbnb) — {len(airbnb_records)} listing(s), shown separately", expanded=True):
             st.caption("Airbnb lists private rooms/apartments, not hotel rooms — prices aren't directly comparable to hotel BAR rates and are excluded from the stats and charts above.")
             airbnb_df = pd.DataFrame(airbnb_records)
             airbnb_df["price_zar"] = pd.to_numeric(airbnb_df["price_zar"], errors="coerce")
