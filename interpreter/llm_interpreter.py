@@ -203,28 +203,16 @@ class LLMInterpreter:
                     item["notes"] = f"Rule-based (LLM parse error: {e})"
                     all_results.append(item)
             except Exception as e:
-                logger.error(f"[interpreter] LLM call failed: {e}")
-                for j, rec in enumerate(batch):
-                    all_results.append({
-                        "original_index": i + j,
-                        "channel": rec.get("channel", ""),
-                        "property_name": rec.get("property_name", ""),
-                        "check_in": rec.get("check_in", ""),
-                        "check_out": rec.get("check_out", ""),
-                        "room_label_raw": rec.get("room_label", ""),
-                        "rate_label_raw": rec.get("rate_label", ""),
-                        "price_zar": rec.get("price_zar"),
-                        "rate_type": "UNKNOWN",
-                        "room_type": "UNKNOWN",
-                        "meals_included": "Unknown",
-                        "cancellation": "Unknown",
-                        "is_target_property": False,
-                        "competitor_tier": "UNKNOWN",
-                        "anomaly_flags": ["llm_api_error"],
-                        "confidence": "LOW",
-                        "notes": str(e),
-                        "_raw": rec
-                    })
+                # Connection/API-level failure (not a parse error) — fall back to rule-based
+                # classification for this batch instead of emitting placeholder records with
+                # is_target_property hardcoded False, which broke target-vs-competitor stats
+                # and flooded every record with a meaningless "llm_api_error" anomaly flag.
+                logger.error(f"[interpreter] LLM call failed: {e} — using rules for batch")
+                from .rule_interpreter import rule_interpret
+                for j, item in enumerate(rule_interpret(batch, self.target_name)):
+                    item["original_index"] = i + j
+                    item["notes"] = f"Rule-based (LLM call failed: {e})"
+                    all_results.append(item)
 
         logger.info(f"[interpreter] interpretation complete: {len(all_results)} records")
         return all_results
