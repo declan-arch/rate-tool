@@ -152,8 +152,12 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
             if direct_url:
                 push_status(f"Checking direct website: {direct_url}...")
                 try:
-                    direct_results = await DirectScraper(config).run(direct_url, target_name)
-                    push_status(f"  → found {len(direct_results)} price(s) on direct site (best-effort).")
+                    scraper = DirectScraper(config)
+                    direct_results = await scraper.run(direct_url, target_name)
+                    if direct_results:
+                        push_status(f"  → found {len(direct_results)} price(s) on direct site (best-effort).")
+                    else:
+                        push_status(f"  ⚠ no data — {scraper.last_diagnostic or 'unknown reason'}")
                     records.extend(direct_results)
                 except Exception as error:
                     push_status(f"  ⚠ Direct website check failed: {error}")
@@ -164,8 +168,12 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
                 for comp_url in competitor_urls:
                     push_status(f"  → {comp_url}...")
                     try:
-                        comp_results = await DirectScraper(config).run(comp_url)
-                        push_status(f"    found {len(comp_results)} price(s) (best-effort).")
+                        scraper = DirectScraper(config)
+                        comp_results = await scraper.run(comp_url)
+                        if comp_results:
+                            push_status(f"    found {len(comp_results)} price(s) (best-effort).")
+                        else:
+                            push_status(f"    ⚠ no data — {scraper.last_diagnostic or 'unknown reason'}")
                         records.extend(comp_results)
                     except Exception as error:
                         push_status(f"  ⚠ {comp_url} failed: {error}")

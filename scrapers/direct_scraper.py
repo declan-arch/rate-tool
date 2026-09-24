@@ -50,9 +50,30 @@ GENERIC_TITLE_PHRASES = {
 }
 COMMON_SUBDOMAIN_PREFIXES = {"www", "book", "booking", "reservations", "reservation", "res", "stay", "stays", "hotel", "hotels", "secure", "app"}
 
+# For classifying WHY nothing was found, surfaced to the caller as `last_diagnostic`
+# instead of a silent "0 results" — the whole point being to tell a bot-blocked page
+# (not worth retrying) apart from a genuinely sold-out one (also not worth retrying,
+# but for a different reason) apart from a page our heuristic just couldn't parse.
+BOT_BLOCK_MARKERS = re.compile(
+    r"access (has been |is )?restricted|access denied|unusual traffic|verify you are human|"
+    r"complete the captcha|are you a robot|automated (request|traffic|detection)|"
+    r"request blocked|please enable javascript and cookies|checking your browser|"
+    r"pardon our interruption|attention required|temporarily restricted",
+    re.IGNORECASE,
+)
+NO_AVAILABILITY_MARKERS = re.compile(
+    r"no availability|no rooms? available|sold out|fully booked|no results? found|"
+    r"nothing available",
+    re.IGNORECASE,
+)
+
 
 class DirectScraper(BaseScraper):
     CHANNEL = "direct"
+
+    def __init__(self, config: dict):
+        super().__init__(config)
+        self.last_diagnostic = None  # set when scrape() finds nothing — why, not just that
 
     async def run(self, url: str, property_name: str = None) -> list[dict]:
         """Overrides BaseScraper.run() to carry an optional property_name through —
@@ -120,16 +141,37 @@ class DirectScraper(BaseScraper):
                         resolved_name = property_name or await self._derive_property_name(page, url)
                         rates = await self._extract_heuristic_prices(page, resolved_name, ci, co, url, scraped_at)
 
+                if not rates:
+                    self.last_diagnostic = await self._diagnose_empty_result(page)
+
                 await browser.close()
                 return rates
             except PlaywrightTimeout:
+                self.last_diagnostic = "page took too long to load (timeout)"
                 self.logger.error(f"[direct] timeout loading '{url}'")
                 await browser.close()
                 return []
             except Exception as e:
+                self.last_diagnostic = f"error loading page: {e}"
                 self.logger.error(f"[direct] unexpected error: {e}")
                 await browser.close()
                 return []
+
+    async def _diagnose_empty_result(self, page) -> str:
+        try:
+            text = await page.inner_text("body")
+        except Exception:
+            return "could not read page content"
+        if BOT_BLOCK_MARKERS.search(text):
+            return "blocked by bot detection — not worth retrying without a different approach (e.g. a proxy)"
+        # Checked before the "no availability" text match: a widget showing that boilerplate
+        # with almost nothing else on the page (no hotel name, no branding, no room details)
+        # is a generic/property-less URL, not a real per-property "sorry, sold out" response.
+        if len(text.strip()) < 500:
+            return "page has almost no content — likely a generic/property-less URL (no name, no branding visible)"
+        if NO_AVAILABILITY_MARKERS.search(text):
+            return "page loaded fine and genuinely shows no availability for these dates"
+        return "page loaded with real content, but no price near booking-related text was found — may need a more specific URL (e.g. straight to the rates page)"
 
     async def _try_semper_datepicker(self, page, ci: str, co: str) -> bool:
         """Fill in a Semper Booking Engine date-range picker and submit the search.
