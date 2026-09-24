@@ -112,6 +112,14 @@ class DirectScraper(BaseScraper):
                     resolved_name = property_name or await self._derive_property_name(page, url)
                     rates = await self._extract_heuristic_prices(page, resolved_name, ci, co, url, scraped_at)
 
+                if not rates and await page.locator('input[name="ngxStartDatePicker"]').count() > 0:
+                    # Semper Booking Engine (used by several SA hotels) defaults to
+                    # tonight/tomorrow with no dates for our actual check-in window —
+                    # fill in the real dates and submit before giving up.
+                    if await self._try_semper_datepicker(page, ci, co):
+                        resolved_name = property_name or await self._derive_property_name(page, url)
+                        rates = await self._extract_heuristic_prices(page, resolved_name, ci, co, url, scraped_at)
+
                 await browser.close()
                 return rates
             except PlaywrightTimeout:
@@ -122,6 +130,53 @@ class DirectScraper(BaseScraper):
                 self.logger.error(f"[direct] unexpected error: {e}")
                 await browser.close()
                 return []
+
+    async def _try_semper_datepicker(self, page, ci: str, co: str) -> bool:
+        """Fill in a Semper Booking Engine date-range picker and submit the search.
+        Its calendar re-renders after each click, invalidating cached locators, so
+        both date fields and day cells are re-queried fresh at each step."""
+        try:
+            ci_date = datetime.strptime(ci, "%Y-%m-%d")
+            co_date = datetime.strptime(co, "%Y-%m-%d")
+
+            await page.click('input[name="ngxStartDatePicker"]', timeout=3000)
+            await page.wait_for_timeout(800)
+            if not await self._click_calendar_day(page, ci_date.day):
+                return False
+            await page.wait_for_timeout(800)
+
+            await page.click('input[name="ngxEndDatePicker"]', timeout=3000)
+            await page.wait_for_timeout(800)
+            if not await self._click_calendar_day(page, co_date.day):
+                return False
+            await page.wait_for_timeout(800)
+
+            for sel in ['button:has-text("Show Availability")', 'button:has-text("Search")']:
+                try:
+                    await page.click(sel, timeout=2000)
+                    await page.wait_for_timeout(3000)
+                    return True
+                except Exception:
+                    continue
+            return False
+        except Exception as e:
+            self.logger.warning(f"[direct] Semper date-picker interaction failed: {e}")
+            return False
+
+    async def _click_calendar_day(self, page, day_num: int) -> bool:
+        """Click a visible calendar cell matching day_num. Prefers a current-month cell
+        (class "available", no "off") over an adjacent-month overflow cell ("available off")
+        with the same day number, and skips cells the widget has hidden after a prior click."""
+        for cell_locator in (
+            page.locator(".calendar-table td.available:not(.off)", has_text=str(day_num)),
+            page.locator(".calendar-table td.available.off", has_text=str(day_num)),
+        ):
+            for i in range(await cell_locator.count()):
+                cell = cell_locator.nth(i)
+                if (await cell.inner_text()).strip() == str(day_num) and await cell.is_visible():
+                    await cell.click(timeout=5000)
+                    return True
+        return False
 
     async def _derive_property_name(self, page, url: str) -> str:
         """No name is supplied for competitor URLs — best-effort label from the
