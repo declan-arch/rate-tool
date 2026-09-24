@@ -33,32 +33,78 @@ def _ensure_playwright_chromium():
 _ensure_playwright_chromium()
 
 st.set_page_config(
-    page_title="Rate Intelligence · RevGrowth",
-    page_icon="📊",
+    page_title="Rate Intelligence",
+    page_icon="◆",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
+# Palette — black / white / mustard, minimal and editorial rather than decorative.
+INK = "#111111"
+INK_MUTED = "#6B6B66"
+PAPER = "#FFFFFF"
+PAPER_MUTED = "#FAFAF7"
+LINE = "#E4E1D8"
+MUSTARD = "#C9972B"
+MUSTARD_DARK = "#A67D20"
+RUST = "#B5651D"  # reserved for a single "more expensive" signal — everything else stays mono
+
+CHART_LAYOUT = {
+    "paper_bgcolor": PAPER,
+    "plot_bgcolor": PAPER,
+    "font": {"color": INK, "family": "Helvetica, Arial, sans-serif", "size": 13},
+    "title": {"font": {"size": 15, "color": INK}},
+    "xaxis": {"gridcolor": LINE, "zerolinecolor": LINE, "linecolor": LINE},
+    "yaxis": {"gridcolor": LINE, "zerolinecolor": LINE, "linecolor": LINE},
+    "margin": {"l": 40, "r": 20, "t": 50, "b": 40},
+    "colorway": [MUSTARD, INK, "#9B9B93", RUST],
+}
+
 st.markdown(
-    """
+    f"""
     <style>
-    .stApp { background-color: #0D1B2A; color: #F0F0F0; }
-    [data-testid="stSidebar"] { background-color: #111E2E; border-right: 1px solid #1E3A5F; }
-    [data-testid="stSidebar"] label { color: #C9A84C !important; font-weight: 600; }
-    .rg-header { background: linear-gradient(135deg, #0D1B2A, #1E3A5F); border: 1px solid #C9A84C; border-radius: 8px; padding: 24px 32px; margin-bottom: 24px; }
-    .rg-title { color: #C9A84C; font-size: 2rem; font-weight: 700; margin: 0; }
-    .rg-tagline { color: #2A9D8F; font-size: 1rem; margin: 4px 0 0; }
-    .rg-card { background-color: #111E2E; border: 1px solid #1E3A5F; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
-    .status-running, .status-done, .status-error { border-radius: 20px; padding: 6px 16px; font-weight: 600; display: inline-block; }
-    .status-running { background-color: #2A9D8F22; border: 1px solid #2A9D8F; color: #2A9D8F; }
-    .status-done { background-color: #27AE6022; border: 1px solid #27AE60; color: #27AE60; }
-    .status-error { background-color: #C0392B22; border: 1px solid #C0392B; color: #C0392B; }
-    .rg-metric { background-color: #0D1B2A; border: 1px solid #1E3A5F; border-radius: 6px; padding: 14px; text-align: center; }
-    .rg-metric-val { font-size: 1.6rem; font-weight: 700; color: #C9A84C; }
-    .rg-metric-lbl { font-size: 0.78rem; color: #8FA8C0; margin-top: 2px; }
-    .stButton > button { background-color: #C9A84C; color: #0D1B2A; font-weight: 700; border: none; border-radius: 6px; padding: 10px 24px; width: 100%; }
-    .stButton > button:hover { background-color: #E8C46A; color: #0D1B2A; }
-    hr { border-color: #1E3A5F; }
+    .stApp {{ background-color: {PAPER}; color: {INK}; }}
+    html, body, [class*="css"] {{ font-family: Helvetica, Arial, sans-serif; }}
+
+    [data-testid="stSidebar"] {{ background-color: {INK}; }}
+    [data-testid="stSidebar"] * {{ color: {PAPER} !important; }}
+    [data-testid="stSidebar"] label {{ font-weight: 600; letter-spacing: .02em; }}
+    [data-testid="stSidebar"] hr {{ border-color: #333333; }}
+    [data-testid="stSidebar"] input, [data-testid="stSidebar"] textarea {{
+        background-color: #1C1C1C !important; border: 1px solid #333333 !important; color: {PAPER} !important;
+    }}
+    [data-testid="stSidebar"] .stCaption, [data-testid="stSidebar"] small {{ color: #A3A39C !important; }}
+
+    .ri-header {{ display: flex; align-items: baseline; justify-content: space-between; border-bottom: 2px solid {MUSTARD}; padding-bottom: 14px; margin-bottom: 28px; }}
+    .ri-title {{ color: {INK}; font-size: 1.5rem; font-weight: 700; margin: 0; letter-spacing: -.01em; }}
+    .ri-tagline {{ color: {INK_MUTED}; font-size: .85rem; margin: 2px 0 0; }}
+
+    .ri-card {{ background-color: {PAPER_MUTED}; border: 1px solid {LINE}; border-radius: 4px; padding: 20px 24px; margin-bottom: 16px; }}
+    .ri-card h3, .ri-card h4 {{ color: {INK}; margin-top: 0; font-weight: 700; }}
+    .ri-card p, .ri-card li {{ color: {INK_MUTED}; }}
+
+    .status-pill {{ border-radius: 3px; padding: 5px 14px; font-weight: 600; font-size: .8rem; display: inline-block; letter-spacing: .03em; text-transform: uppercase; }}
+    .status-running {{ background-color: #FFFFFF; border: 1px solid {MUSTARD}; color: {MUSTARD_DARK}; }}
+    .status-done {{ background-color: {INK}; border: 1px solid {INK}; color: {PAPER}; }}
+    .status-error {{ background-color: #FFFFFF; border: 1px solid {RUST}; color: {RUST}; }}
+
+    .ri-metric {{ background-color: {PAPER}; border: 1px solid {LINE}; border-top: 3px solid {MUSTARD}; border-radius: 3px; padding: 16px; text-align: left; }}
+    .ri-metric-val {{ font-size: 1.5rem; font-weight: 700; color: {INK}; line-height: 1.1; }}
+    .ri-metric-lbl {{ font-size: .72rem; color: {INK_MUTED}; margin-top: 4px; text-transform: uppercase; letter-spacing: .04em; }}
+
+    .stButton > button {{ background-color: {MUSTARD}; color: {INK}; font-weight: 700; border: none; border-radius: 3px; padding: 10px 20px; width: 100%; letter-spacing: .01em; }}
+    .stButton > button:hover {{ background-color: {MUSTARD_DARK}; color: {PAPER}; }}
+    [data-testid="stSidebar"] .stButton > button {{ background-color: {MUSTARD}; color: {INK}; }}
+    [data-testid="stSidebar"] .stButton > button:hover {{ background-color: #E0B24F; }}
+
+    .stDownloadButton > button {{ background-color: {PAPER}; color: {INK}; border: 1px solid {INK}; font-weight: 600; border-radius: 3px; }}
+    .stDownloadButton > button:hover {{ background-color: {INK}; color: {PAPER}; }}
+
+    [data-testid="stTabs"] button[role="tab"] {{ font-weight: 600; color: {INK_MUTED}; }}
+    [data-testid="stTabs"] button[aria-selected="true"] {{ color: {INK}; border-bottom-color: {MUSTARD} !important; }}
+
+    hr {{ border-color: {LINE}; }}
+    [data-testid="stDataFrame"] {{ border: 1px solid {LINE}; border-radius: 3px; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -88,11 +134,10 @@ def init_state():
 
 def render_password_gate():
     st.markdown(
-        """
-        <div style="max-width:420px;margin:80px auto 0;background:#111E2E;border:1px solid #C9A84C;border-radius:10px;padding:40px 36px;text-align:center">
-          <div style="font-size:2.2rem">📊</div>
-          <div style="color:#C9A84C;font-size:1.4rem;font-weight:700">Rate Intelligence</div>
-          <div style="color:#2A9D8F;font-size:.9rem">RevGrowth · South African Hospitality</div>
+        f"""
+        <div style="max-width:400px;margin:100px auto 0;border-top:3px solid {MUSTARD};padding:32px 4px;text-align:center">
+          <div style="color:{INK};font-size:1.3rem;font-weight:700;letter-spacing:-.01em">Rate Intelligence</div>
+          <div style="color:{INK_MUTED};font-size:.82rem;margin-top:4px">South African Hospitality</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -280,7 +325,7 @@ if not st.session_state.authenticated:
     st.stop()
 
 with st.sidebar:
-    st.markdown("### ⚙️ Scan Settings")
+    st.markdown("### SCAN SETTINGS")
     st.markdown("---")
     property_name = st.text_input("Property name", placeholder="e.g. The Tyrwhitt Rosebank")
     direct_website_url = st.text_input("Hotel's direct website (optional)", placeholder="e.g. themonarchhotel.co.za", help="Best-effort rate check on the property's own booking site — every hotel site is built differently, so this is lower-confidence than the OTA scrapers.")
@@ -300,11 +345,11 @@ with st.sidebar:
     api_key = st.text_input("Anthropic API key", value=os.environ.get("ANTHROPIC_API_KEY", ""), type="password")
     st.markdown("---")
     can_run = bool(property_name.strip()) and bool(selected_channels) and st.session_state.run_state != "running"
-    run_button = st.button("🚀 Run Scan", disabled=not can_run)
+    run_button = st.button("Run Scan", disabled=not can_run)
     if not property_name.strip():
-        st.caption("⬆ Enter a property name to enable scanning.")
+        st.caption("Enter a property name to enable scanning.")
     st.markdown("---")
-    with st.expander("📂 View a local scan"):
+    with st.expander("View a local scan"):
         st.caption("Booking.com and other OTAs may block Streamlit Cloud's IP. For reliable results, run `python run.py` on your own machine, then load the resulting interpreted_rates_*.json here to share it.")
         uploaded = st.file_uploader("interpreted_rates_*.json", type="json", label_visibility="collapsed")
         if uploaded is not None and st.button("Load into dashboard"):
@@ -323,9 +368,9 @@ with st.sidebar:
             except Exception as error:
                 st.error(f"Couldn't load file: {error}")
     st.markdown("---")
-    st.caption("RevGrowth Rate Intelligence v1.0")
+    st.caption("Rate Intelligence · v1.0")
 
-st.markdown('<div class="rg-header"><div class="rg-title">📊 RevGrowth Rate Intelligence</div><div class="rg-tagline">Rate Intelligence for South African Hospitality</div></div>', unsafe_allow_html=True)
+st.markdown(f'<div class="ri-header"><div><div class="ri-title">Rate Intelligence</div><div class="ri-tagline">South African Hospitality — competitive rate tracking</div></div></div>', unsafe_allow_html=True)
 
 if run_button:
     config = build_config(property_name.strip(), checkin_date, competitor_urls, direct_website_url.strip())
@@ -344,26 +389,26 @@ state = st.session_state.run_state
 if state == "idle":
     left, right = st.columns([3, 2])
     with left:
-        st.markdown('<div class="rg-card"><h3 style="color:#C9A84C;margin-top:0">What this tool does</h3><p style="color:#C0C8D0;line-height:1.7">The <strong>Rate Intelligence Agent</strong> scans South African OTA channels for live property rates, compares them with selected competitors, and produces an Excel report.</p><h4 style="color:#2A9D8F">How it works</h4><ol style="color:#C0C8D0;line-height:1.9"><li><strong>Scrape</strong> live rate cards from each OTA.</li><li><strong>Interpret</strong> rates and flag anomalies.</li><li><strong>Report</strong> results in a colour-coded workbook.</li></ol></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="ri-card"><h3>What this tool does</h3><p style="line-height:1.7">Scans South African OTA channels and direct hotel websites for live rates, compares them with selected competitors, and produces a downloadable report.</p><h4>How it works</h4><ol style="line-height:1.9"><li>Scrape live rate data from each channel.</li><li>Interpret rates and flag anomalies.</li><li>Report results in a filterable dashboard and workbook.</li></ol></div>', unsafe_allow_html=True)
     with right:
-        st.markdown('<div class="rg-card"><h4 style="color:#C9A84C;margin-top:0">Quick start</h4><ol style="color:#C0C8D0;line-height:1.9"><li>Enter a property name and a check-in date.</li><li>Optionally add the hotel\'s direct website and competitor URLs.</li><li>Optionally provide an Anthropic API key.</li><li>Click <strong>Run Scan</strong>.</li></ol></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="ri-card"><h4>Quick start</h4><ol style="line-height:1.9"><li>Enter a property name and a check-in date.</li><li>Optionally add the hotel\'s direct website and competitor URLs.</li><li>Optionally provide an Anthropic API key.</li><li>Click <strong>Run Scan</strong>.</li></ol></div>', unsafe_allow_html=True)
 elif state == "running":
-    st.markdown('<div class="status-running">⏳ Scan in progress</div>', unsafe_allow_html=True)
+    st.markdown('<div class="status-pill status-running">Scan in progress</div>', unsafe_allow_html=True)
     messages = st.session_state.get("status_messages", [])
     if messages:
         with st.expander("Live progress log", expanded=True):
             st.code("\n".join(messages))
-    with st.spinner("Scanning OTA channels — this takes 2–5 minutes..."):
+    with st.spinner("Scanning channels — this takes 2–5 minutes..."):
         import time
         time.sleep(3)
         st.rerun()
 elif state == "done":
-    st.markdown('<div class="status-done">✅ Scan complete</div>', unsafe_allow_html=True)
+    st.markdown('<div class="status-pill status-done">Scan complete</div>', unsafe_allow_html=True)
     interpreted = st.session_state.interpreted_data or []
     # Airbnb lists private rooms/apartments, not hotel inventory — no BB/DBB rate plans,
     # no real geographic constraint on its search, and a structurally different price
-    # distribution. It's shown in its own section further down, never blended into the
-    # headline hotel-vs-hotel comparison below.
+    # distribution. It's shown in its own tab, never blended into the headline
+    # hotel-vs-hotel comparison.
     hotel_records = [row for row in interpreted if row.get("channel") != "airbnb"]
     airbnb_records = [row for row in interpreted if row.get("channel") == "airbnb"]
     target_prices = [row["price_zar"] for row in hotel_records if row.get("is_target_property") and row.get("price_zar")]
@@ -374,101 +419,132 @@ elif state == "done":
     for column, value, label in zip(columns, metrics, labels):
         with column:
             display = f"R {value:,}" if isinstance(value, int) and label in {"Your avg rate", "Competitor avg"} else value
-            st.markdown(f'<div class="rg-metric"><div class="rg-metric-val">{display}</div><div class="rg-metric-lbl">{label}</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="ri-metric"><div class="ri-metric-val">{display}</div><div class="ri-metric-lbl">{label}</div></div>', unsafe_allow_html=True)
     if airbnb_records:
-        st.caption(f"ℹ️ {len(airbnb_records)} Airbnb listing(s) found but excluded from the stats above — see \"Alternative Accommodation (Airbnb)\" below.")
-    excel_path = st.session_state.excel_path
-    if hotel_records:
-        import pandas as pd
-        import plotly.express as px
-        import plotly.graph_objects as go
+        st.caption(f"{len(airbnb_records)} Airbnb listing(s) found but excluded from the stats above — see the Airbnb tab.")
 
-        chart_data = pd.DataFrame(hotel_records)
+    excel_path = st.session_state.excel_path
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+
+    chart_data = pd.DataFrame(hotel_records) if hotel_records else pd.DataFrame()
+    target_name = "Your Property"
+    priced_data = pd.DataFrame()
+    if not chart_data.empty:
         chart_data["channel_label"] = chart_data["channel"].map(CHANNEL_LABELS_DISPLAY).fillna(chart_data["channel"])
         target_rows = chart_data[chart_data["is_target_property"].fillna(False)]
         target_name = target_rows["property_name"].dropna().iloc[0] if not target_rows.empty else "Your Property"
         chart_data["property_name"] = chart_data["property_name"].fillna("Unknown")
         chart_data["price_zar"] = pd.to_numeric(chart_data["price_zar"], errors="coerce")
         priced_data = chart_data.dropna(subset=["price_zar"])
-        layout = {
-            "paper_bgcolor": "#0D1B2A",
-            "plot_bgcolor": "#0D1B2A",
-            "font": {"color": "#F0F0F0"},
-            "xaxis": {"gridcolor": "#1E3A5F", "zerolinecolor": "#1E3A5F"},
-            "yaxis": {"gridcolor": "#1E3A5F", "zerolinecolor": "#1E3A5F"},
-            "margin": {"l": 40, "r": 20, "t": 55, "b": 40},
-        }
 
-        property_averages = priced_data.groupby(["property_name", "is_target_property"], dropna=False)["price_zar"].mean().reset_index()
-        property_averages["color"] = property_averages["is_target_property"].map({True: "Your property", False: "Competitor"}).fillna("Competitor")
-        figure = px.bar(property_averages, x="property_name", y="price_zar", color="color", color_discrete_map={"Your property": "#C9A84C", "Competitor": "#2E86AB"}, title=f"Rate Comparison — {target_name} vs Competitors", labels={"property_name": "Property", "price_zar": "Average price (ZAR)"})
-        figure.update_layout(showlegend=False, **layout)
-        st.plotly_chart(figure, use_container_width=True)
+    tab_overview, tab_channels, tab_airbnb, tab_data = st.tabs(["Overview", "Channel Analysis", "Airbnb", "Data & Downloads"])
 
-        chart_left, chart_right = st.columns(2)
-        with chart_left:
-            # Target's own records aren't a "position" relative to itself — exclude them so
-            # the chart actually shows competitor cheaper/comparable/more-expensive spread.
-            competitor_only = chart_data[~chart_data["is_target_property"].fillna(False)]
-            tier_counts = competitor_only["competitor_tier"].fillna("UNKNOWN").value_counts().rename_axis("tier").reset_index(name="count")
-            tier_colors = {"CHEAPER": "#2DC653", "COMPARABLE": "#C9A84C", "MORE_EXPENSIVE": "#E63946", "UNKNOWN": "#6C757D"}
-            if tier_counts.empty:
-                st.info("No competitor data to position yet.")
-            else:
-                figure = go.Figure(go.Pie(labels=tier_counts["tier"], values=tier_counts["count"], hole=0.5, marker={"colors": [tier_colors.get(tier, "#6C757D") for tier in tier_counts["tier"]]}))
-                figure.update_layout(title="Competitor Positioning", showlegend=True, **layout)
-                st.plotly_chart(figure, use_container_width=True)
-        with chart_right:
-            rate_counts = chart_data["rate_type"].fillna("UNKNOWN").value_counts().rename_axis("rate_type").reset_index(name="count")
-            figure = px.bar(rate_counts, x="count", y="rate_type", orientation="h", title="Rate Types Found", labels={"count": "Count", "rate_type": "Rate type"})
-            figure.update_traces(marker_color="#2A9D8F")
-            figure.update_layout(**layout)
+    with tab_overview:
+        if priced_data.empty:
+            st.info("No priced hotel-channel records yet — run a scan to populate this view.")
+        else:
+            property_averages = priced_data.groupby(["property_name", "is_target_property"], dropna=False)["price_zar"].mean().reset_index()
+            property_averages["color"] = property_averages["is_target_property"].map({True: "Your property", False: "Competitor"}).fillna("Competitor")
+            figure = px.bar(property_averages, x="property_name", y="price_zar", color="color", color_discrete_map={"Your property": MUSTARD, "Competitor": INK}, title=f"Rate Comparison — {target_name} vs Competitors", labels={"property_name": "Property", "price_zar": "Average price (ZAR)"})
+            figure.update_layout(showlegend=False, **CHART_LAYOUT)
             st.plotly_chart(figure, use_container_width=True)
 
-        channel_averages = priced_data.groupby(["channel_label", "property_name"], dropna=False)["price_zar"].mean().reset_index()
-        figure = px.bar(channel_averages, x="channel_label", y="price_zar", color="property_name", barmode="group", title="Average Rate by Channel", labels={"channel_label": "Channel", "price_zar": "Average price (ZAR)"})
-        figure.update_layout(**layout)
-        st.plotly_chart(figure, use_container_width=True)
+            chart_left, chart_right = st.columns(2)
+            with chart_left:
+                # Target's own records aren't a "position" relative to itself — exclude them
+                # so the chart actually shows competitor cheaper/comparable/more-expensive spread.
+                competitor_only = chart_data[~chart_data["is_target_property"].fillna(False)]
+                tier_counts = competitor_only["competitor_tier"].fillna("UNKNOWN").value_counts().rename_axis("tier").reset_index(name="count")
+                tier_colors = {"CHEAPER": INK, "COMPARABLE": MUSTARD, "MORE_EXPENSIVE": RUST, "UNKNOWN": "#C7C4B8"}
+                if tier_counts.empty:
+                    st.info("No competitor data to position yet.")
+                else:
+                    figure = go.Figure(go.Pie(labels=tier_counts["tier"], values=tier_counts["count"], hole=0.55, marker={"colors": [tier_colors.get(tier, "#C7C4B8") for tier in tier_counts["tier"]]}))
+                    figure.update_layout(title="Competitor Positioning", showlegend=True, **CHART_LAYOUT)
+                    st.plotly_chart(figure, use_container_width=True)
+            with chart_right:
+                rate_counts = chart_data["rate_type"].fillna("UNKNOWN").value_counts().rename_axis("rate_type").reset_index(name="count")
+                figure = px.bar(rate_counts, x="count", y="rate_type", orientation="h", title="Rate Types Found", labels={"count": "Count", "rate_type": "Rate type"})
+                figure.update_traces(marker_color=MUSTARD)
+                figure.update_layout(**CHART_LAYOUT)
+                st.plotly_chart(figure, use_container_width=True)
 
-        figure = px.box(priced_data, x="property_name", y="price_zar", color="is_target_property", title="Price Distribution by Property", labels={"property_name": "Property", "price_zar": "Price (ZAR)", "is_target_property": "Target property"})
-        figure.update_layout(showlegend=False, **layout)
-        st.plotly_chart(figure, use_container_width=True)
+    with tab_channels:
+        if priced_data.empty:
+            st.info("No priced hotel-channel records yet — run a scan to populate this view.")
+        else:
+            channel_averages = priced_data.groupby(["channel_label", "property_name"], dropna=False)["price_zar"].mean().reset_index()
+            figure = px.bar(channel_averages, x="channel_label", y="price_zar", color="property_name", barmode="group", title="Average Rate by Channel", labels={"channel_label": "Channel", "price_zar": "Average price (ZAR)"})
+            figure.update_layout(**CHART_LAYOUT)
+            st.plotly_chart(figure, use_container_width=True)
 
-    if airbnb_records:
-        import pandas as pd
-        import plotly.express as px
+            figure = px.box(priced_data, x="property_name", y="price_zar", color="is_target_property", title="Price Distribution by Property", labels={"property_name": "Property", "price_zar": "Price (ZAR)", "is_target_property": "Target property"}, color_discrete_sequence=[INK, MUSTARD])
+            figure.update_layout(showlegend=False, **CHART_LAYOUT)
+            st.plotly_chart(figure, use_container_width=True)
 
-        with st.expander(f"🏠 Alternative Accommodation (Airbnb) — {len(airbnb_records)} listing(s), shown separately", expanded=True):
-            st.caption("Airbnb lists private rooms/apartments, not hotel rooms — prices aren't directly comparable to hotel BAR rates and are excluded from the stats and charts above.")
+    with tab_airbnb:
+        if not airbnb_records:
+            st.info("No Airbnb listings found in this scan.")
+        else:
+            st.caption("Airbnb lists private rooms/apartments, not hotel rooms — prices aren't directly comparable to hotel BAR rates and are excluded from the Overview/Channel Analysis tabs.")
             airbnb_df = pd.DataFrame(airbnb_records)
             airbnb_df["price_zar"] = pd.to_numeric(airbnb_df["price_zar"], errors="coerce")
             airbnb_priced = airbnb_df.dropna(subset=["price_zar"])
             if not airbnb_priced.empty:
                 airbnb_avg = airbnb_priced.groupby("property_name", dropna=False)["price_zar"].mean().reset_index()
                 figure = px.bar(airbnb_avg, x="property_name", y="price_zar", title="Airbnb Listings — Average Price", labels={"property_name": "Listing", "price_zar": "Average price (ZAR)"})
-                figure.update_traces(marker_color="#8A6FBF")
-                figure.update_layout(paper_bgcolor="#0D1B2A", plot_bgcolor="#0D1B2A", font={"color": "#F0F0F0"}, xaxis={"gridcolor": "#1E3A5F"}, yaxis={"gridcolor": "#1E3A5F"}, margin={"l": 40, "r": 20, "t": 55, "b": 40})
+                figure.update_traces(marker_color=MUSTARD)
+                figure.update_layout(**CHART_LAYOUT)
                 st.plotly_chart(figure, use_container_width=True)
             st.dataframe(pd.DataFrame([{"Listing": row.get("property_name", ""), "Price (ZAR)": row.get("price_zar")} for row in airbnb_records]), use_container_width=True, hide_index=True)
 
-    if excel_path and Path(excel_path).exists():
-        with open(excel_path, "rb") as report_file:
-            st.download_button("⬇️ Download Excel Report", report_file.read(), file_name=Path(excel_path).name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    if interpreted:
-        table = pd.DataFrame([{"Property": row.get("property_name", ""), "Channel": CHANNEL_LABELS_DISPLAY.get(row.get("channel", ""), row.get("channel", "")), "Room Type": row.get("room_type", ""), "Rate Type": row.get("rate_type", ""), "Price (ZAR)": row.get("price_zar"), "Competitor Tier": row.get("competitor_tier", ""), "Confidence": row.get("confidence", ""), "Anomalies": ", ".join(row.get("anomaly_flags", [])) or "—"} for row in interpreted])
-        st.markdown("### Rate Summary Table")
-        st.caption("Includes all channels, including Airbnb — filter by Channel below. Headline stats above exclude Airbnb.")
-        channel_filter = st.selectbox("Filter by channel", ["All"] + sorted(table["Channel"].dropna().unique().tolist()))
-        rate_filter = st.selectbox("Filter by rate type", ["All"] + sorted(table["Rate Type"].dropna().unique().tolist()))
-        if channel_filter != "All":
-            table = table[table["Channel"] == channel_filter]
-        if rate_filter != "All":
-            table = table[table["Rate Type"] == rate_filter]
-        st.dataframe(table, use_container_width=True, height=420, hide_index=True)
+    with tab_data:
+        download_left, download_right = st.columns(2)
+        with download_left:
+            if excel_path and Path(excel_path).exists():
+                with open(excel_path, "rb") as report_file:
+                    st.download_button("Download Excel Report", report_file.read(), file_name=Path(excel_path).name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        with download_right:
+            if interpreted:
+                csv_bytes = pd.DataFrame(interpreted).to_csv(index=False).encode("utf-8")
+                st.download_button("Download Raw Data (CSV)", csv_bytes, file_name="rate_intelligence_data.csv", mime="text/csv", use_container_width=True)
+
+        if interpreted:
+            table = pd.DataFrame([{"Property": row.get("property_name", ""), "Channel": CHANNEL_LABELS_DISPLAY.get(row.get("channel", ""), row.get("channel", "")), "Room Type": row.get("room_type", ""), "Rate Type": row.get("rate_type", ""), "Price (ZAR)": row.get("price_zar"), "Competitor Tier": row.get("competitor_tier", ""), "Confidence": row.get("confidence", ""), "Anomalies": ", ".join(row.get("anomaly_flags", [])) or "—"} for row in interpreted])
+            st.markdown("#### Rate Summary Table")
+            st.caption("Includes all channels, including Airbnb. Headline stats in Overview exclude Airbnb. Click a column header to sort, or use the filters below.")
+
+            filter_left, filter_mid, filter_right, sort_col = st.columns(4)
+            with filter_left:
+                channel_filter = st.selectbox("Channel", ["All"] + sorted(table["Channel"].dropna().unique().tolist()))
+            with filter_mid:
+                rate_filter = st.selectbox("Rate type", ["All"] + sorted(table["Rate Type"].dropna().unique().tolist()))
+            with filter_right:
+                tier_filter = st.selectbox("Competitor tier", ["All"] + sorted(table["Competitor Tier"].dropna().unique().tolist()))
+            with sort_col:
+                sort_choice = st.selectbox("Sort by", ["Default", "Price (low to high)", "Price (high to low)", "Property (A–Z)"])
+
+            if channel_filter != "All":
+                table = table[table["Channel"] == channel_filter]
+            if rate_filter != "All":
+                table = table[table["Rate Type"] == rate_filter]
+            if tier_filter != "All":
+                table = table[table["Competitor Tier"] == tier_filter]
+            if sort_choice == "Price (low to high)":
+                table = table.sort_values("Price (ZAR)", ascending=True, na_position="last")
+            elif sort_choice == "Price (high to low)":
+                table = table.sort_values("Price (ZAR)", ascending=False, na_position="last")
+            elif sort_choice == "Property (A–Z)":
+                table = table.sort_values("Property", ascending=True, na_position="last")
+
+            st.dataframe(table, use_container_width=True, height=420, hide_index=True)
+            st.caption(f"Showing {len(table)} of {len(interpreted)} records.")
 elif state == "error":
-    st.markdown('<div class="status-error">❌ Scan failed</div>', unsafe_allow_html=True)
+    st.markdown('<div class="status-pill status-error">Scan failed</div>', unsafe_allow_html=True)
     st.error(st.session_state.get("error_message", "Unknown error"))
-    if st.button("🔄 Try Again"):
+    if st.button("Try Again"):
         st.session_state.run_state = "idle"
         st.session_state.status_messages = []
         st.session_state.error_message = None
