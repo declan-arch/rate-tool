@@ -164,19 +164,38 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
 
             if not target_only:
                 competitor_urls = config["competitor_set"]["competitor_urls"]
-                push_status(f"Checking {len(competitor_urls)} competitor website(s)...")
+                push_status(f"Checking {len(competitor_urls)} competitor(s) — direct site + {', '.join(CHANNEL_LABELS_DISPLAY.get(c, c) for c in channels if c in scraper_map)}...")
                 for comp_url in competitor_urls:
                     push_status(f"  → {comp_url}...")
+                    comp_name = None
                     try:
                         scraper = DirectScraper(config)
                         comp_results = await scraper.run(comp_url)
                         if comp_results:
-                            push_status(f"    found {len(comp_results)} price(s) (best-effort).")
+                            comp_name = comp_results[0]["property_name"]  # confirmed real, not a blocked-page title guess
+                            push_status(f"    direct site: found {len(comp_results)} price(s) (best-effort).")
                         else:
-                            push_status(f"    ⚠ no data — {scraper.last_diagnostic or 'unknown reason'}")
+                            push_status(f"    ⚠ direct site: no data — {scraper.last_diagnostic or 'unknown reason'}")
                         records.extend(comp_results)
                     except Exception as error:
                         push_status(f"  ⚠ {comp_url} failed: {error}")
+
+                    # Also search Booking.com/Airbnb for this competitor by name — but only
+                    # once we have a name confirmed from real page content (comp_name), not
+                    # a guess derived from a blocked or property-less page.
+                    if comp_name:
+                        ota_results = await asyncio.gather(
+                            *(scrape_one(channel, comp_name) for channel in channels if channel in scraper_map),
+                            return_exceptions=True,
+                        )
+                        for channel, result in zip((c for c in channels if c in scraper_map), ota_results):
+                            if isinstance(result, Exception):
+                                push_status(f"    ⚠ {CHANNEL_LABELS_DISPLAY.get(channel, channel)}: {result}")
+                            else:
+                                push_status(f"    {CHANNEL_LABELS_DISPLAY.get(channel, channel)}: found {len(result)} rate(s).")
+                                records.extend(result)
+                    elif comp_url:
+                        push_status(f"    (skipping Booking.com/Airbnb for this one — no confirmed name to search)")
 
             return records
 

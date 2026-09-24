@@ -74,6 +74,7 @@ class DirectScraper(BaseScraper):
     def __init__(self, config: dict):
         super().__init__(config)
         self.last_diagnostic = None  # set when scrape() finds nothing — why, not just that
+        self.last_resolved_name = None  # the competitor name derived from the page, even if no prices were found
 
     async def run(self, url: str, property_name: str = None) -> list[dict]:
         """Overrides BaseScraper.run() to carry an optional property_name through —
@@ -114,6 +115,7 @@ class DirectScraper(BaseScraper):
                 # reset a booking engine back to its date-picker step, wiping out prices
                 # that were already visible).
                 resolved_name = property_name or await self._derive_property_name(page, url)
+                self.last_resolved_name = resolved_name
                 rates = await self._extract_heuristic_prices(page, resolved_name, ci, co, url, scraped_at)
 
                 if not rates:
