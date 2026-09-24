@@ -30,6 +30,17 @@ UPSELL_KEYWORDS = re.compile(
     r"per adult|per person|add a|extra choice|parking|breakfast add|spa treatment",
     re.IGNORECASE,
 )
+# The actual room-type name (e.g. "3 Bedroom 3 Bath Penthouse") is often many lines above
+# its price on these pages, well outside the narrow context window used for the price
+# match itself — track the most recent heading-like line as we scan forward so prices can
+# be attributed to the right room instead of showing generic nearby UI text as the label.
+ROOM_HEADING_PATTERN = re.compile(
+    r"\b(room|suite|apartment|studio|bedroom|penthouse|cottage|cabin|unit|villa|chalet|bungalow)\b",
+    re.IGNORECASE,
+)
+# Availability/inventory text ("Only 1 Unit Left") matches the room-heading pattern above
+# (via "unit") just as easily as a real room-type name — exclude it explicitly.
+NON_HEADING_MARKERS = re.compile(r"\bleft\b|\bavailable\b|\bsold\b|\bremaining\b", re.IGNORECASE)
 # Booking-engine pages (e.g. a hosted results/checkout step) often carry a generic step
 # title like "Guests and Extras" instead of the hotel's name — reject titles made up
 # entirely of these words and fall back to the domain instead.
@@ -265,7 +276,12 @@ class DirectScraper(BaseScraper):
         lines = [line.strip() for line in body_text.splitlines() if line.strip()]
 
         seen_prices = set()
+        current_room_heading = ""
         for i, line in enumerate(lines):
+            if (len(line) <= 80 and not PRICE_PATTERN.search(line)
+                    and ROOM_HEADING_PATTERN.search(line) and not NON_HEADING_MARKERS.search(line)):
+                current_room_heading = line
+
             for match in PRICE_PATTERN.finditer(line):
                 raw_num = match.group(1).replace(",", "").replace(" ", "")
                 try:
@@ -283,13 +299,18 @@ class DirectScraper(BaseScraper):
                 if UPSELL_KEYWORDS.search(context):
                     continue  # add-on/upsell price (dinner voucher, room upgrade, etc.), not the room rate
 
+                if current_room_heading and current_room_heading.lower() not in context.lower():
+                    room_label = f"{current_room_heading} — {context}"
+                else:
+                    room_label = context
+
                 seen_prices.add(price_zar)
                 rates.append(RawRate(
                     channel=self.CHANNEL,
                     property_name=property_name,
                     check_in=ci,
                     check_out=co,
-                    room_label=context[:120],
+                    room_label=room_label[:150],
                     rate_label="Direct website (unverified)",
                     price_zar=price_zar,
                     price_raw=match.group(0),
