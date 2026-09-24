@@ -19,7 +19,15 @@ from .base_scraper import BaseScraper, RawRate
 
 PRICE_PATTERN = re.compile(r"(?:R|ZAR)\s?([\d][\d,\s]{2,7}(?:\.\d{2})?)\b", re.IGNORECASE)
 BOOKING_KEYWORDS = re.compile(
-    r"book|rate|room|night|stay|availab|reserv|price|check.?in|tariff",
+    r"book|rate|room|night|stay|availab|reserv|price|check.?in|tariff|pay|total|deal|offer",
+    re.IGNORECASE,
+)
+# Add-on/upsell pricing (dinner vouchers, room upgrades, extras) matches the booking
+# keywords above just as easily as the actual room rate — exclude it explicitly so it
+# doesn't get picked up ahead of the real rate in document order.
+UPSELL_KEYWORDS = re.compile(
+    r"voucher|upgrade|add.?on|addon|insurance|supplement|optional|personalise|personalize|"
+    r"per adult|per person|add a|extra choice|parking|breakfast add|spa treatment",
     re.IGNORECASE,
 )
 # Booking-engine pages (e.g. a hosted results/checkout step) often carry a generic step
@@ -29,6 +37,16 @@ GENERIC_TITLE_WORDS = {
     "guests", "extras", "and", "checkout", "results", "result", "search", "availability",
     "book", "now", "confirm", "confirmation", "payment", "reservation", "reservations",
     "cart", "summary", "booking", "step", "details", "select", "choose", "review", "your",
+    "room",
+}
+# Whole-phrase generic titles a booking engine commonly reuses across every property —
+# checked before the word-level check since some individual words above (e.g. "room")
+# are too common to safely blacklist on their own without this exact-phrase net.
+GENERIC_TITLE_PHRASES = {
+    "room reservations", "guests and extras", "booking engine", "availability",
+    "check availability", "reserve now", "your booking", "confirm your stay",
+    "select your room", "room selection", "book now", "checkout", "reservation",
+    "reservations", "booking", "results", "search results",
 }
 COMMON_SUBDOMAIN_PREFIXES = {"www", "book", "booking", "reservations", "reservation", "res", "stay", "stays", "hotel", "hotels", "secure", "app"}
 
@@ -68,26 +86,32 @@ class DirectScraper(BaseScraper):
                 await page.goto(url, wait_until="domcontentloaded", timeout=self.scrape_cfg["timeout_ms"])
                 await page.wait_for_timeout(3000)
 
-                # Dismiss common cookie/consent banners — best effort, ignore failures.
-                for sel in ['[id*="cookie" i] button', '[class*="cookie" i] button', 'button[aria-label*="accept" i]']:
-                    try:
-                        await page.click(sel, timeout=1500)
-                    except Exception:
-                        pass
-
-                # Look for an explicit "book now" / "check rates" entry point and follow
-                # it once — many hotel sites hide pricing behind a booking-widget click.
-                for sel in ['a:has-text("Book Now")', 'a:has-text("Check Availability")',
-                            'button:has-text("Book Now")', 'button:has-text("Check Rates")']:
-                    try:
-                        await page.click(sel, timeout=2000)
-                        await page.wait_for_timeout(3000)
-                        break
-                    except Exception:
-                        continue
-
+                # Try extracting from the page as-loaded first. Only fall back to clicking
+                # around (cookie banners, "Book Now") if that finds nothing — a click can
+                # reset a page that was already showing real rates (seen in practice: a
+                # broad cookie-banner selector matched an unrelated widget control and
+                # reset a booking engine back to its date-picker step, wiping out prices
+                # that were already visible).
                 resolved_name = property_name or await self._derive_property_name(page, url)
                 rates = await self._extract_heuristic_prices(page, resolved_name, ci, co, url, scraped_at)
+
+                if not rates:
+                    for sel in ['[id*="cookie" i] button', 'button[aria-label*="accept" i]']:
+                        try:
+                            await page.click(sel, timeout=1500)
+                        except Exception:
+                            pass
+                    for sel in ['a:has-text("Book Now")', 'a:has-text("Check Availability")',
+                                'button:has-text("Book Now")', 'button:has-text("Check Rates")']:
+                        try:
+                            await page.click(sel, timeout=2000)
+                            await page.wait_for_timeout(3000)
+                            break
+                        except Exception:
+                            continue
+                    resolved_name = property_name or await self._derive_property_name(page, url)
+                    rates = await self._extract_heuristic_prices(page, resolved_name, ci, co, url, scraped_at)
+
                 await browser.close()
                 return rates
             except PlaywrightTimeout:
@@ -101,18 +125,28 @@ class DirectScraper(BaseScraper):
 
     async def _derive_property_name(self, page, url: str) -> str:
         """No name is supplied for competitor URLs — best-effort label from the
-        page's own <title>, falling back to the domain name if the title looks like
-        a generic booking-flow step (e.g. "Guests and Extras") rather than a hotel name."""
+        page's own <title>, falling back to the domain name if every segment of the
+        title looks like a generic booking-flow step (e.g. "Guests and Extras",
+        "Room Reservations") rather than a hotel name. Titles like "Room Reservations
+        - The Capital Melrose" put the generic part first, so every segment is
+        checked, not just the first."""
         try:
             title = (await page.title()).strip()
+            candidates = [title]
             for sep in [" | ", " – ", " — ", " - ", " :: "]:
                 if sep in title:
-                    title = title.split(sep)[0].strip()
+                    candidates = [p.strip() for p in title.split(sep)]
                     break
-            words = set(re.findall(r"[a-z]+", title.lower()))
-            is_generic = bool(words) and words.issubset(GENERIC_TITLE_WORDS)
-            if title and 2 <= len(title) <= 80 and not is_generic:
-                return title
+            for candidate in candidates:
+                if not (candidate and 2 <= len(candidate) <= 80):
+                    continue
+                normalized = candidate.lower().strip()
+                if normalized in GENERIC_TITLE_PHRASES:
+                    continue
+                words = set(re.findall(r"[a-z]+", normalized))
+                if words and words.issubset(GENERIC_TITLE_WORDS):
+                    continue
+                return candidate
         except Exception:
             pass
         return self._domain_to_name(url)
@@ -147,6 +181,8 @@ class DirectScraper(BaseScraper):
                 context = " ".join(lines[max(0, i - 2):i + 1])
                 if not BOOKING_KEYWORDS.search(context):
                     continue  # price-looking number with no booking context nearby
+                if UPSELL_KEYWORDS.search(context):
+                    continue  # add-on/upsell price (dinner voucher, room upgrade, etc.), not the room rate
 
                 seen_prices.add(price_zar)
                 rates.append(RawRate(
