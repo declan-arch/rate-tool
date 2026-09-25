@@ -53,7 +53,7 @@ CHART_LAYOUT = {
     "paper_bgcolor": PAPER,
     "plot_bgcolor": PAPER,
     "font": {"color": INK, "family": "Helvetica, Arial, sans-serif", "size": 13},
-    "title": {"font": {"size": 15, "color": INK}},
+    "title_font": {"size": 15, "color": INK},
     "xaxis": {"gridcolor": LINE, "zerolinecolor": LINE, "linecolor": LINE},
     "yaxis": {"gridcolor": LINE, "zerolinecolor": LINE, "linecolor": LINE},
     "margin": {"l": 40, "r": 20, "t": 50, "b": 40},
@@ -411,19 +411,7 @@ elif state == "done":
     # hotel-vs-hotel comparison.
     hotel_records = [row for row in interpreted if row.get("channel") != "airbnb"]
     airbnb_records = [row for row in interpreted if row.get("channel") == "airbnb"]
-    target_prices = [row["price_zar"] for row in hotel_records if row.get("is_target_property") and row.get("price_zar")]
-    competitor_prices = [row["price_zar"] for row in hotel_records if not row.get("is_target_property") and row.get("price_zar")]
-    metrics = [len(hotel_records), len({row.get("channel") for row in hotel_records}), round(sum(target_prices) / len(target_prices)) if target_prices else "N/A", round(sum(competitor_prices) / len(competitor_prices)) if competitor_prices else "N/A", sum(bool(row.get("anomaly_flags")) for row in hotel_records)]
-    labels = ["Total records", "Channels scraped", "Your avg rate", "Competitor avg", "Anomalies flagged"]
-    columns = st.columns(5)
-    for column, value, label in zip(columns, metrics, labels):
-        with column:
-            display = f"R {value:,}" if isinstance(value, int) and label in {"Your avg rate", "Competitor avg"} else value
-            st.markdown(f'<div class="ri-metric"><div class="ri-metric-val">{display}</div><div class="ri-metric-lbl">{label}</div></div>', unsafe_allow_html=True)
-    if airbnb_records:
-        st.caption(f"{len(airbnb_records)} Airbnb listing(s) found but excluded from the stats above — see the Airbnb tab.")
 
-    excel_path = st.session_state.excel_path
     import pandas as pd
     import plotly.express as px
     import plotly.graph_objects as go
@@ -437,7 +425,35 @@ elif state == "done":
         target_name = target_rows["property_name"].dropna().iloc[0] if not target_rows.empty else "Your Property"
         chart_data["property_name"] = chart_data["property_name"].fillna("Unknown")
         chart_data["price_zar"] = pd.to_numeric(chart_data["price_zar"], errors="coerce")
+        # Group on the actual scraped room name (room_label_raw), not room_type — room_type
+        # is a coarse classification (e.g. everything gets bucketed into STANDARD/SUPERIOR/
+        # SUITE/FAMILY) that collapses genuinely different rooms together, which would throw
+        # away real room variety rather than just the rate-plan duplication below.
+        room_key = chart_data["room_label_raw"] if "room_label_raw" in chart_data.columns else chart_data.get("room_type")
+        chart_data["_room_key"] = room_key.fillna("UNKNOWN") if room_key is not None else "UNKNOWN"
         priced_data = chart_data.dropna(subset=["price_zar"])
+        # A room table typically lists the same room at several rate-plan prices
+        # (room-only, non-refundable+breakfast, flexible+breakfast, ...) — averaging
+        # every variant blends fundamentally different products into one misleading
+        # "average rate". Keep only each room's cheapest rate plan per property/channel
+        # as its representative price for every average and chart below.
+        if not priced_data.empty:
+            priced_data = priced_data.loc[priced_data.groupby(["property_name", "channel", "_room_key"], dropna=False)["price_zar"].idxmin()]
+
+    target_prices = priced_data.loc[priced_data["is_target_property"].fillna(False), "price_zar"].tolist() if not priced_data.empty else []
+    competitor_prices = priced_data.loc[~priced_data["is_target_property"].fillna(False), "price_zar"].tolist() if not priced_data.empty else []
+    metrics = [len(priced_data), len({row.get("channel") for row in hotel_records}), round(sum(target_prices) / len(target_prices)) if target_prices else "N/A", round(sum(competitor_prices) / len(competitor_prices)) if competitor_prices else "N/A", sum(bool(row.get("anomaly_flags")) for row in hotel_records)]
+    labels = ["Room types found", "Channels scraped", "Your avg rate", "Competitor avg", "Anomalies flagged"]
+    columns = st.columns(5)
+    for column, value, label in zip(columns, metrics, labels):
+        with column:
+            display = f"R {value:,}" if isinstance(value, int) and label in {"Your avg rate", "Competitor avg"} else value
+            st.markdown(f'<div class="ri-metric"><div class="ri-metric-val">{display}</div><div class="ri-metric-lbl">{label}</div></div>', unsafe_allow_html=True)
+    st.caption(f"Averages use each room type's cheapest rate plan only ({len(hotel_records)} total rate-plan variants scraped) — see Data & Downloads for every variant.")
+    if airbnb_records:
+        st.caption(f"{len(airbnb_records)} Airbnb listing(s) found but excluded from the stats above — see the Airbnb tab.")
+
+    excel_path = st.session_state.excel_path
 
     tab_overview, tab_channels, tab_airbnb, tab_data = st.tabs(["Overview", "Channel Analysis", "Airbnb", "Data & Downloads"])
 
@@ -455,7 +471,7 @@ elif state == "done":
             with chart_left:
                 # Target's own records aren't a "position" relative to itself — exclude them
                 # so the chart actually shows competitor cheaper/comparable/more-expensive spread.
-                competitor_only = chart_data[~chart_data["is_target_property"].fillna(False)]
+                competitor_only = priced_data[~priced_data["is_target_property"].fillna(False)]
                 tier_counts = competitor_only["competitor_tier"].fillna("UNKNOWN").value_counts().rename_axis("tier").reset_index(name="count")
                 tier_colors = {"CHEAPER": INK, "COMPARABLE": MUSTARD, "MORE_EXPENSIVE": RUST, "UNKNOWN": "#C7C4B8"}
                 if tier_counts.empty:
