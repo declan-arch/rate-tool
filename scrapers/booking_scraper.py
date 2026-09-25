@@ -11,6 +11,32 @@ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTim
 
 from .base_scraper import BaseScraper, RawRate
 
+# Booking.com's search occasionally returns a "closest available" or otherwise unrelated
+# property instead of a real match for the query — with no visible signal that it did so
+# (found live: four different Midrand hotel searches all silently landed on the same
+# "Protea Hotel Midrand" page; "The Michelangelo Hotel" landed on a hotel in Italy). A raw
+# string-similarity ratio isn't reliable here either — a shared area name like "Sandton"
+# inflates the score for a wrong match almost as much as a real one. Stripping generic
+# hotel-descriptor and area words first and requiring the remaining distinctive brand
+# tokens to actually overlap reliably separates real matches from coincidental ones.
+GENERIC_HOTEL_WORDS = {"hotel", "hotels", "the", "resort", "suites", "suite", "villas", "villa", "spa", "and",
+                        "estate", "lodge", "inn", "country", "courtyard", "guesthouse", "guest", "house",
+                        "boutique", "collection", "group"}
+AREA_WORDS = {"sandton", "rosebank", "midrand", "cape", "town", "durban", "umhlanga", "johannesburg", "joburg",
+              "jhb", "waterfront", "gauteng", "south", "africa"}
+
+
+def _core_tokens(name: str) -> set:
+    words = re.findall(r"[a-z0-9]+", name.lower())
+    return {w for w in words if w not in GENERIC_HOTEL_WORDS and w not in AREA_WORDS}
+
+
+def names_match(search_term: str, found_name: str) -> bool:
+    search_core, found_core = _core_tokens(search_term), _core_tokens(found_name)
+    if not search_core or not found_core:
+        return False
+    return len(search_core & found_core) / len(search_core) >= 0.5
+
 
 class BookingScraper(BaseScraper):
     CHANNEL = "booking_com"
@@ -71,6 +97,11 @@ class BookingScraper(BaseScraper):
                     await browser.close()
                     return []
 
+                if not names_match(search_term, property_name):
+                    self.logger.warning(f"[booking.com] top result '{property_name}' doesn't match search '{search_term}' — treating as no match")
+                    await browser.close()
+                    return []
+
                 # Step 3: Navigate to property page
                 if not property_link.startswith("http"):
                     property_link = self.BASE_URL + property_link
@@ -80,13 +111,20 @@ class BookingScraper(BaseScraper):
                                 timeout=self.scrape_cfg["timeout_ms"])
                 await page.wait_for_timeout(3000)
 
-                # Re-confirm property name from page
+                # Re-confirm property name from page — more authoritative than the search
+                # results card, and worth re-checking against search_term in case the card
+                # and the actual property page disagree on what got landed on.
                 try:
                     name_el = await page.query_selector('h2[data-capla-component*="PropertyHeader"], .hp__hotel-name, h1.pp-header__title')
                     property_name = await name_el.inner_text() if name_el else search_term
                     property_name = property_name.strip()
                 except Exception:
                     property_name = search_term
+
+                if not names_match(search_term, property_name):
+                    self.logger.warning(f"[booking.com] property page '{property_name}' doesn't match search '{search_term}' — treating as no match")
+                    await browser.close()
+                    return []
 
                 # Step 4: Extract room rows
                 rates = await self._extract_room_rates(page, property_name, ci, co, property_link)

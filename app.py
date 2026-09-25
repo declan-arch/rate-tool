@@ -118,6 +118,35 @@ CHANNEL_MAP = {
 CHANNEL_LABELS_DISPLAY = {value: key for key, value in CHANNEL_MAP.items()}
 CHANNEL_LABELS_DISPLAY["direct"] = "Direct Website"
 
+# Every name below was live-verified against Booking.com this session — each resolves to
+# a real, correctly-matched property with real rates (checked via the names_match safeguard
+# in booking_scraper.py, not just "did a search return something"). Several originally-listed
+# names either had no real match or, worse, silently matched the WRONG property (e.g. "The
+# Michelangelo Hotel" landed on a hotel in Italy; four different "Midrand" searches all
+# landed on the same "Protea Hotel Midrand" page) — those were dropped rather than padded
+# out with unverified guesses, so some areas have fewer than 5 entries.
+AREA_COMPETITORS = {
+    "rosebank": ["Radisson Red Rosebank", "The Peech Hotel", "Southern Sun Rosebank"],
+    "sandton": ["Radisson Blu Gautrain Hotel Sandton", "The Maslow Hotel Sandton", "Sandton Sun", "Hilton Sandton"],
+    "midrand": ["Protea Hotel Midrand", "City Lodge Hotel Midrand"],
+    "cape town": ["The Silo Hotel Cape Town", "One&Only Cape Town", "Radisson Blu Hotel Waterfront Cape Town", "Cape Grace", "Victoria and Alfred Hotel"],
+    "waterfront": ["The Silo Hotel Cape Town", "One&Only Cape Town", "Radisson Blu Hotel Waterfront Cape Town", "Cape Grace", "Victoria and Alfred Hotel"],
+    "durban": ["Radisson Blu Hotel Durban Umhlanga", "Protea Hotel Durban Umhlanga", "Coastlands Umhlanga Hotel", "Garden Court South Beach Durban", "Southern Sun Elangeni & Maharani"],
+}
+DEFAULT_COMPETITORS = ["Radisson Red Johannesburg", "Protea Hotel Johannesburg", "Southern Sun OR Tambo", "Garden Court Sandton City", "Southern Sun Katherine Street"]
+
+
+def get_auto_competitors(property_name, location="", count=5):
+    """Match competitors by explicit location first, falling back to scanning the
+    property name text, then a generic default. Returns (competitors, used_default)."""
+    name_lower = property_name.lower()
+    location_lower = (location or "").lower()
+    for area, competitors in AREA_COMPETITORS.items():
+        if area == location_lower or area in name_lower:
+            filtered = [item for item in competitors if item.lower() not in name_lower and name_lower not in item.lower()]
+            return filtered[:count], False
+    return DEFAULT_COMPETITORS[:count], True
+
 
 def init_state():
     defaults = {
@@ -127,6 +156,7 @@ def init_state():
         "excel_path": None,
         "interpreted_data": None,
         "error_message": None,
+        "competitor_fallback_warning": None,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -208,39 +238,15 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
                     push_status(f"  ⚠ Direct website check failed: {error}")
 
             if not target_only:
-                competitor_urls = config["competitor_set"]["competitor_urls"]
-                push_status(f"Checking {len(competitor_urls)} competitor(s) — direct site + {', '.join(CHANNEL_LABELS_DISPLAY.get(c, c) for c in channels if c in scraper_map)}...")
-                for comp_url in competitor_urls:
-                    push_status(f"  → {comp_url}...")
-                    comp_name = None
-                    try:
-                        scraper = DirectScraper(config)
-                        comp_results = await scraper.run(comp_url)
-                        if comp_results:
-                            comp_name = comp_results[0]["property_name"]  # confirmed real, not a blocked-page title guess
-                            push_status(f"    direct site: found {len(comp_results)} price(s) (best-effort).")
-                        else:
-                            push_status(f"    ⚠ direct site: no data — {scraper.last_diagnostic or 'unknown reason'}")
-                        records.extend(comp_results)
-                    except Exception as error:
-                        push_status(f"  ⚠ {comp_url} failed: {error}")
-
-                    # Also search Booking.com/Airbnb for this competitor by name — but only
-                    # once we have a name confirmed from real page content (comp_name), not
-                    # a guess derived from a blocked or property-less page.
-                    if comp_name:
-                        ota_results = await asyncio.gather(
-                            *(scrape_one(channel, comp_name) for channel in channels if channel in scraper_map),
-                            return_exceptions=True,
-                        )
-                        for channel, result in zip((c for c in channels if c in scraper_map), ota_results):
-                            if isinstance(result, Exception):
-                                push_status(f"    ⚠ {CHANNEL_LABELS_DISPLAY.get(channel, channel)}: {result}")
-                            else:
-                                push_status(f"    {CHANNEL_LABELS_DISPLAY.get(channel, channel)}: found {len(result)} rate(s).")
-                                records.extend(result)
-                    elif comp_url:
-                        push_status(f"    (skipping Booking.com/Airbnb for this one — no confirmed name to search)")
+                competitors = config["competitor_set"]["competitors"]
+                push_status(f"Scraping {len(competitors)} competitor(s) across {len(channels)} channel(s)...")
+                for competitor in competitors:
+                    push_status(f"  → {competitor}...")
+                    competitor_results = await asyncio.gather(
+                        *(scrape_one(channel, competitor) for channel in channels if channel in scraper_map),
+                        return_exceptions=True,
+                    )
+                    records.extend(result for result in competitor_results if not isinstance(result, Exception) for result in result)
 
             return records
 
@@ -301,11 +307,12 @@ def run_scan_thread(config, channels, target_only, api_key, output_dir):
         st.session_state.run_state = "error"
 
 
-def build_config(property_name, checkin_date, competitor_urls, direct_website_url=""):
+def build_config(property_name, checkin_date, competitors, location="", direct_website_url=""):
     offset_days = max(1, (checkin_date - datetime.today().date()).days)
     return {
         "target_property": {
             "name": property_name,
+            "location": location,
             "direct_website_url": direct_website_url,
             "booking_com_search": property_name,
             "airbnb_search": property_name,
@@ -314,7 +321,7 @@ def build_config(property_name, checkin_date, competitor_urls, direct_website_ur
             "nightly_rates": {},
             "monthly_rates": {},
         },
-        "competitor_set": {"competitor_urls": competitor_urls},
+        "competitor_set": {"competitors": competitors},
         "scrape_config": {"check_in_offset_days": offset_days, "nights": 1, "adults": 2, "children": 0, "currency": "ZAR", "headless": True, "timeout_ms": 30000},
     }
 
@@ -328,20 +335,21 @@ with st.sidebar:
     st.markdown("### SCAN SETTINGS")
     st.markdown("---")
     property_name = st.text_input("Property name", placeholder="e.g. The Tyrwhitt Rosebank")
+    location = st.selectbox("Area / suburb", ["(unspecified)"] + sorted(a.title() for a in AREA_COMPETITORS), help="Drives auto-detection of nearby competitors when their fields below are left blank — pick the closest match even if not exact.")
+    location = "" if location == "(unspecified)" else location.lower()
     st.markdown("**Channels** — Booking.com and Airbnb are the reliable core")
     channel_selections = {label: st.checkbox(label, value=True) for label in CHANNEL_MAP}
     selected_channels = [CHANNEL_MAP[label] for label, selected in channel_selections.items() if selected]
     checkin_date = st.date_input("Check-in date", value=datetime.today() + timedelta(days=7), min_value=datetime.today() + timedelta(days=1))
     direct_website_url = st.text_input("Hotel's direct website (bonus, optional)", placeholder="e.g. themonarchhotel.co.za", help="Best-effort supplementary check on the property's own booking site — every hotel runs different software, so this fills gaps when it works but isn't the number to trust first. Test it below before running a full scan.")
     include_competitors = st.toggle("Include competitors", value=True)
-    competitor_urls = []
+    competitors = []
     if include_competitors:
-        st.markdown("**Competitor website URLs (bonus)**")
-        st.caption("Same best-effort direct-site check as above, run once per competitor — supplementary to the Booking.com/Airbnb search this also triggers when it finds a real name.")
+        st.markdown("**Competitor names** *(blank = auto-detect from area)*")
         for index in range(5):
-            comp_url = st.text_input(f"Competitor {index + 1} URL", key=f"competitor_url_{index}", placeholder="e.g. radissonhotels.com/...", label_visibility="collapsed")
-            if comp_url.strip():
-                competitor_urls.append(comp_url.strip())
+            competitor = st.text_input(f"Competitor {index + 1}", key=f"competitor_{index}", placeholder="Leave blank for auto-detect", label_visibility="collapsed")
+            if competitor.strip():
+                competitors.append(competitor.strip())
     api_key = st.text_input("Anthropic API key", value=os.environ.get("ANTHROPIC_API_KEY", ""), type="password")
     st.markdown("---")
     can_run = bool(property_name.strip()) and bool(selected_channels) and st.session_state.run_state != "running"
@@ -390,9 +398,20 @@ with st.sidebar:
     st.caption("Rate Intelligence · v1.0")
 
 st.markdown(f'<div class="ri-header"><div><div class="ri-title">Rate Intelligence</div><div class="ri-tagline">South African Hospitality — competitive rate tracking</div></div></div>', unsafe_allow_html=True)
+if st.session_state.get("competitor_fallback_warning"):
+    st.warning(st.session_state.competitor_fallback_warning)
 
 if run_button:
-    config = build_config(property_name.strip(), checkin_date, competitor_urls, direct_website_url.strip())
+    if competitors:
+        competitors_final, used_default = competitors, False
+    else:
+        competitors_final, used_default = get_auto_competitors(property_name, location)
+    st.session_state.competitor_fallback_warning = (
+        "No area was set and none was recognised from the property name — "
+        "used a generic Johannesburg competitor list. Pick an Area/suburb in the "
+        "sidebar or enter competitor names manually for accurate results."
+    ) if used_default else None
+    config = build_config(property_name.strip(), checkin_date, competitors_final, location, direct_website_url.strip())
     (TOOL_DIR / "config" / "_run_config.json").write_text(json.dumps(config, indent=2))
     st.session_state.run_state = "running"
     st.session_state.status_messages = []
