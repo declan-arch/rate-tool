@@ -328,16 +328,16 @@ with st.sidebar:
     st.markdown("### SCAN SETTINGS")
     st.markdown("---")
     property_name = st.text_input("Property name", placeholder="e.g. The Tyrwhitt Rosebank")
-    direct_website_url = st.text_input("Hotel's direct website (optional)", placeholder="e.g. themonarchhotel.co.za", help="Best-effort rate check on the property's own booking site — every hotel site is built differently, so this is lower-confidence than the OTA scrapers.")
-    st.markdown("**Channels**")
+    st.markdown("**Channels** — Booking.com and Airbnb are the reliable core")
     channel_selections = {label: st.checkbox(label, value=True) for label in CHANNEL_MAP}
     selected_channels = [CHANNEL_MAP[label] for label, selected in channel_selections.items() if selected]
     checkin_date = st.date_input("Check-in date", value=datetime.today() + timedelta(days=7), min_value=datetime.today() + timedelta(days=1))
+    direct_website_url = st.text_input("Hotel's direct website (bonus, optional)", placeholder="e.g. themonarchhotel.co.za", help="Best-effort supplementary check on the property's own booking site — every hotel runs different software, so this fills gaps when it works but isn't the number to trust first. Test it below before running a full scan.")
     include_competitors = st.toggle("Include competitors", value=True)
     competitor_urls = []
     if include_competitors:
-        st.markdown("**Competitor website URLs**")
-        st.caption("Same best-effort direct-site check as above, run once per competitor.")
+        st.markdown("**Competitor website URLs (bonus)**")
+        st.caption("Same best-effort direct-site check as above, run once per competitor — supplementary to the Booking.com/Airbnb search this also triggers when it finds a real name.")
         for index in range(5):
             comp_url = st.text_input(f"Competitor {index + 1} URL", key=f"competitor_url_{index}", placeholder="e.g. radissonhotels.com/...", label_visibility="collapsed")
             if comp_url.strip():
@@ -367,6 +367,25 @@ with st.sidebar:
                 st.rerun()
             except Exception as error:
                 st.error(f"Couldn't load file: {error}")
+    st.markdown("---")
+    with st.expander("Test a single URL"):
+        st.caption("Check one competitor or direct-site URL in seconds — catch a bad link before committing to a full scan.")
+        test_url = st.text_input("URL to test", key="test_url_input", placeholder="e.g. book.nightsbridge.com/13381", label_visibility="collapsed")
+        if st.button("Test URL", key="test_url_button") and test_url.strip():
+            with st.spinner("Testing..."):
+                from scrapers.direct_scraper import DirectScraper
+                test_config = build_config("Test", checkin_date, [], "")
+                test_scraper = DirectScraper(test_config)
+                test_results = asyncio.run(test_scraper.run(test_url.strip()))
+            if test_results:
+                import pandas as pd
+                st.success(f'Found {len(test_results)} price(s) as "{test_results[0]["property_name"]}"')
+                st.dataframe(
+                    pd.DataFrame([{"Room": r.get("room_label", "")[:60], "Price (ZAR)": r.get("price_zar")} for r in test_results]),
+                    use_container_width=True, hide_index=True,
+                )
+            else:
+                st.warning(f"No data — {test_scraper.last_diagnostic or 'unknown reason'}")
     st.markdown("---")
     st.caption("Rate Intelligence · v1.0")
 
